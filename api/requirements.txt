@@ -1,0 +1,8 @@
+# FastAPI backend
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+sqlalchemy[asyncio]>=2.0.30
+aiosqlite>=0.20.0
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0

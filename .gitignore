@@ -1,0 +1,65 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+*.log
+
+# ── Virtual Environment ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+*.venv
+
+# ── Data files (raw CSVs, database files) ───────────────────────────────────
+data/raw/
+data/clean/
+data/transfer_roi.db
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Notebooks / scratch ────────────────────────────────────────────────────
+*.ipynb
+notebooks/
+
+# ── Next.js / Node ──────────────────────────────────────────────────────────
+app/.next/
+app/node_modules/
+app/out/
+app/.env.local
+app/.env*.local
+.next/
+node_modules/
+out/
+
+# ── Project-specific generated files ────────────────────────────────────────
+knowledge-graph/
+scripts/*.pyc
+*.pyc
+
+# ── OS files ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ── IDE / Editor ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.iml
+
+# ── Environment ─────────────────────────────────────────────────────────────
+.env
+.env.*
+*.env
