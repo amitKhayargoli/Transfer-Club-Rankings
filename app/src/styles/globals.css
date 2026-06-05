@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --sidebar-width: 16rem;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--bc) / 0.2);
+  border-radius: 3px;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* More breathing room inside badge/pill shapes */
+.badge {
+  padding-left: 0.6rem;
+  padding-right: 0.6rem;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+}
+
+.badge-xs {
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+}
+
+.badge-sm {
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+}
