@@ -45,17 +45,18 @@ function badgeLabel(type: string | null | undefined): string {
     case "contract_expired": return "Expired";
     case "retired": return "Retired";
     case "free_transfer": return "Free";
-    default: return "—";
+    default: return "";
   }
 }
 
 function formatEuro(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "";
+  const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `€${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `€${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `€${(abs / 1_000).toFixed(1)}K`;
-  return `€${abs.toFixed(0)}`;
+  if (abs >= 1_000_000_000) return `${sign}€${(abs / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sign}€${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}€${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}€${abs.toFixed(0)}`;
 }
 
 const TYPE_OPTIONS = [
@@ -157,11 +158,11 @@ export default function ClubDetailPage() {
         <div>
           <h1 className="text-3xl font-bold">{club.name}</h1>
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            <span className="badge badge-outline">
-              Score: {club.composite_score?.toFixed(3) ?? "—"}
+            <span className="badge badge-outline !p-3">
+              Score: {club.composite_score?.toFixed(3) ?? ""}
             </span>
             {club.domestic_competition_id && (
-              <span className="badge badge-outline flex items-center gap-1.5 px-3 py-1.5">
+              <span className="badge badge-outline flex items-center gap-1.5 !p-3">
                 {club.league_name && (
                   <img
                     src={leagueLogoUrl(club.domestic_competition_id) ?? ""}
@@ -182,7 +183,7 @@ export default function ClubDetailPage() {
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Median ROI</div>
           <div className={`stat-value text-lg ${club.median_roi && club.median_roi > 0 ? "text-success" : "text-error"}`}>
-            {club.median_roi?.toFixed(1) ?? "—"}%
+            {club.median_roi?.toFixed(1) ?? ""}%
           </div>
         </div>
         <div className="stat bg-base-200 rounded-xl">
@@ -191,11 +192,11 @@ export default function ClubDetailPage() {
         </div>
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Hit Rate</div>
-          <div className="stat-value text-lg">{club.hit_rate?.toFixed(1) ?? "—"}%</div>
+          <div className="stat-value text-lg">{club.hit_rate?.toFixed(1) ?? ""}%</div>
         </div>
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Transfers</div>
-          <div className="stat-value text-lg">{club.total_transfers ?? "—"}</div>
+          <div className="stat-value text-lg">{club.total_transfers ?? ""}</div>
         </div>
       </div>
 
@@ -234,7 +235,7 @@ export default function ClubDetailPage() {
             return (
               <button
                 key={opt.key}
-                className={`badge badge-sm cursor-pointer transition-all ${
+                className={`badge badge-sm cursor-pointer transition-all !p-3 ${
                   active ? opt.cls + " badge-outline scale-110" : "badge-ghost opacity-60"
                 }`}
                 onClick={() => toggleType(opt.key)}
@@ -296,7 +297,7 @@ export default function ClubDetailPage() {
                         {t.from_club_id && (
                           <img src={clubLogoUrl(t.from_club_id) ?? ""} alt="" className="w-4 h-4 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                         )}
-                        {t.from_club_name ?? "—"}
+                        {t.from_club_name ?? ""}
                       </span>
                     </td>
                     <td className="text-sm">
@@ -304,10 +305,10 @@ export default function ClubDetailPage() {
                         {t.to_club_id && (
                           <img src={clubLogoUrl(t.to_club_id) ?? ""} alt="" className="w-4 h-4 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                         )}
-                        {t.to_club_name ?? "—"}
+                        {t.to_club_name ?? ""}
                       </span>
                     </td>
-                    <td className="text-sm">{t.transfer_date ?? "—"}</td>
+                    <td className="text-sm">{t.transfer_date ?? ""}</td>
                     <td>
                       <span className={badgeClass(t.transfer_type)}>{badgeLabel(t.transfer_type)}</span>
                     </td>
@@ -315,10 +316,10 @@ export default function ClubDetailPage() {
                       {formatEuro(t.transfer_fee)}
                     </td>
                     <td className={`text-right font-mono text-sm ${calcProfit(t) && calcProfit(t)! > 0 ? "text-success" : calcProfit(t) && calcProfit(t)! < 0 ? "text-error" : ""}`}>
-                      {calcProfit(t) != null ? formatEuro(calcProfit(t)!) : "—"}
+                      {calcProfit(t) != null ? formatEuro(calcProfit(t)!) : ""}
                     </td>
                     <td className={`text-right font-mono text-sm ${calcRoi(t) && calcRoi(t)! > 0 ? "text-success" : calcRoi(t) && calcRoi(t)! < 0 ? "text-error" : ""}`}>
-                      {calcRoi(t)?.toFixed(0) ?? "—"}%
+                      {calcRoi(t)?.toFixed(0) ?? ""}%
                     </td>
                   </tr>
                 ))

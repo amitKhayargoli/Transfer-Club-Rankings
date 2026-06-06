@@ -50,7 +50,7 @@ function badgeLabel(type: string | null | undefined): string {
     case "contract_expired": return "Expired";
     case "retired": return "Retired";
     case "free_transfer": return "Free";
-    default: return "—";
+    default: return "";
   }
 }
 
@@ -63,12 +63,13 @@ function calcRoi(t: { roi_pct?: number | null; profit?: number | null; sell_fee?
 }
 
 function formatEuro(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "";
+  const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `€${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `€${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `€${(abs / 1_000).toFixed(1)}K`;
-  return `€${abs.toFixed(0)}`;
+  if (abs >= 1_000_000_000) return `${sign}€${(abs / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sign}€${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}€${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}€${abs.toFixed(0)}`;
 }
 
 export default function PlayerDetailPage() {
@@ -117,15 +118,15 @@ export default function PlayerDetailPage() {
     <div className="space-y-8">
       {/* Player Header */}
       <div className="flex items-start gap-4">
-        <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center text-secondary-content text-2xl font-bold shrink-0">
+        <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center text-primary-content text-2xl font-bold shrink-0">
           {player.name.charAt(0)}
         </div>
         <div>
           <h1 className="text-3xl font-bold">{player.name}</h1>
           <div className="flex flex-wrap gap-2 mt-2">
-            {player.position && <span className="badge badge-outline">{player.position}</span>}
+            {player.position && <span className="badge badge-outline !p-3">{player.position}</span>}
             {player.current_club_name && (
-              <span className="badge badge-outline">{player.current_club_name}</span>
+              <span className="badge badge-outline !p-3">{player.current_club_name}</span>
             )}
           </div>
         </div>
@@ -217,7 +218,7 @@ export default function PlayerDetailPage() {
             <tbody>
               {transfers?.map((t) => (
                 <tr key={t.transfer_id} className="hover">
-                  <td className="text-sm">{t.transfer_date ?? "—"}</td>
+                  <td className="text-sm">{t.transfer_date ?? ""}</td>
                   <td>
                     {t.from_club_id ? (
                       <Link href={`/clubs/${t.from_club_id}`} className="hover:text-primary transition-colors flex items-center gap-1.5">
@@ -227,10 +228,10 @@ export default function PlayerDetailPage() {
                           className="w-4 h-4 object-contain shrink-0"
                           onError={(e) => { e.currentTarget.style.display = "none"; }}
                         />
-                        {t.from_club_name ?? "—"}
+                        {t.from_club_name ?? ""}
                       </Link>
                     ) : (
-                      t.from_club_name ?? "—"
+                      t.from_club_name ?? ""
                     )}
                   </td>
                   <td>
@@ -242,10 +243,10 @@ export default function PlayerDetailPage() {
                           className="w-4 h-4 object-contain shrink-0"
                           onError={(e) => { e.currentTarget.style.display = "none"; }}
                         />
-                        {t.to_club_name ?? "—"}
+                        {t.to_club_name ?? ""}
                       </Link>
                     ) : (
-                      t.to_club_name ?? "—"
+                      t.to_club_name ?? ""
                     )}
                   </td>
                   <td>
@@ -255,10 +256,10 @@ export default function PlayerDetailPage() {
                     {formatEuro(t.transfer_fee)}
                   </td>
                   <td className={`text-right font-mono text-sm ${calcProfit(t) && calcProfit(t)! > 0 ? "text-success" : calcProfit(t) && calcProfit(t)! < 0 ? "text-error" : ""}`}>
-                    {calcProfit(t) != null ? formatEuro(calcProfit(t)!) : "—"}
+                    {calcProfit(t) != null ? formatEuro(calcProfit(t)!) : ""}
                   </td>
                   <td className={`text-right font-mono text-sm ${calcRoi(t) && calcRoi(t)! > 0 ? "text-success" : calcRoi(t) && calcRoi(t)! < 0 ? "text-error" : ""}`}>
-                    {calcRoi(t)?.toFixed(0) ?? "—"}%
+                    {calcRoi(t)?.toFixed(0) ?? ""}%
                   </td>
                 </tr>
               ))}

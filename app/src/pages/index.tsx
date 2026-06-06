@@ -46,10 +46,10 @@ export default function DashboardPage() {
             <h1 className="text-4xl md:text-5xl font-bold">Transfer ROI Rankings</h1>
             <p className="py-4 text-base-content/70 text-lg">
               Which football clubs are the best at buying low and selling high?
-              Analyzing every European transfer from 2000–2025.
+              Analyzing every European transfer from 2015–2026.
             </p>
             {pipelineStatus && (
-              <div className="badge badge-outline gap-2">
+              <div className="badge badge-outline gap-2 !p-3">
                 <div className={`w-2 h-2 rounded-full ${pipelineStatus.data_loaded ? "bg-success" : "bg-warning"}`} />
                 {pipelineStatus.total_transfers.toLocaleString()} transfers analyzed
               </div>
@@ -63,14 +63,14 @@ export default function DashboardPage() {
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Transfers</div>
           <div className="stat-value text-primary">
-            {stats?.total_transfers?.toLocaleString() ?? "—"}
+            {stats?.total_transfers?.toLocaleString() ?? ""}
           </div>
           <div className="stat-desc">Total analyzed</div>
         </div>
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Clubs</div>
           <div className="stat-value text-secondary">
-            {stats?.total_clubs?.toLocaleString() ?? "—"}
+            {stats?.total_clubs?.toLocaleString() ?? ""}
           </div>
           <div className="stat-desc">Across all leagues</div>
         </div>
@@ -86,7 +86,7 @@ export default function DashboardPage() {
           <div className="stat-value text-lg font-bold text-success">
             {stats?.biggest_profit_transfer
               ? formatEuro(stats.biggest_profit_transfer.profit)
-              : "—"}
+              : ""}
           </div>
           <div className="stat-desc truncate">
             {stats?.biggest_profit_transfer?.player_name ?? ""}
@@ -123,11 +123,11 @@ export default function DashboardPage() {
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3 text-center text-xs">
                   <div>
-                    <div className="font-bold">{tc.club.median_roi?.toFixed(0) ?? "—"}%</div>
+                    <div className="font-bold">{tc.club.median_roi?.toFixed(0) ?? ""}%</div>
                     <div className="text-base-content/50">ROI</div>
                   </div>
                   <div>
-                    <div className="font-bold">{tc.club.hit_rate?.toFixed(0) ?? "—"}%</div>
+                    <div className="font-bold">{tc.club.hit_rate?.toFixed(0) ?? ""}%</div>
                     <div className="text-base-content/50">Hit Rate</div>
                   </div>
                   <div>
@@ -141,36 +141,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* Quick Links */}
-      <section>
-        <h2 className="text-2xl font-bold mb-4">Quick Links</h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <Link href="/rankings" className="card card-compact bg-base-200 hover:bg-base-300 transition-colors">
-            <div className="card-body">
-              <h3 className="card-title">📊 Club Rankings</h3>
-              <p className="text-sm text-base-content/70">
-                Sortable leaderboard of all clubs by ROI, profit, hit rate, and composite score.
-              </p>
-            </div>
-          </Link>
-          <Link href="/explorer" className="card card-compact bg-base-200 hover:bg-base-300 transition-colors">
-            <div className="card-body">
-              <h3 className="card-title">🔍 Transfer Explorer</h3>
-              <p className="text-sm text-base-content/70">
-                Interactive scatter plot and filters to explore individual transfers.
-              </p>
-            </div>
-          </Link>
-          <Link href="/compare" className="card card-compact bg-base-200 hover:bg-base-300 transition-colors">
-            <div className="card-body">
-              <h3 className="card-title">⚔️ Head-to-Head</h3>
-              <p className="text-sm text-base-content/70">
-                Side-by-side comparison of any two clubs across all metrics.
-              </p>
-            </div>
-          </Link>
-        </div>
-      </section>
+
     </div>
   );
 }

@@ -6,18 +6,20 @@
 import { useState, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import Fuse, { type IFuseOptions } from "fuse.js";
 import { fetchClubs, Club, clubLogoUrl } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function formatEuro(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "";
+  const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `€${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `€${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `€${(abs / 1_000).toFixed(1)}K`;
-  return `€${abs.toFixed(0)}`;
+  if (abs >= 1_000_000_000) return `${sign}€${(abs / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sign}€${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}€${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}€${abs.toFixed(0)}`;
 }
 
 type SortField =
@@ -36,6 +38,17 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "hit_rate", label: "Hit Rate %" },
   { value: "total_transfers", label: "Volume" },
 ];
+
+// ── Framer-motion table row variants ─────────────────────────────────────
+
+const rowVariants = {
+  hidden: { opacity: 0, x: -10 },
+  visible: (i: number) => ({
+    opacity: 1,
+    x: 0,
+    transition: { delay: i * 0.025, duration: 0.2 },
+  }),
+};
 
 // ── Fuse.js fuzzy search setup ──────────────────────────────────────────
 
@@ -58,10 +71,13 @@ export default function RankingsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Enriched leagues to show
+  const enrichedLeagues = "GB1,ES1,IT1,FR1,L1,PO1,NL1,A1";
+
   // Fetch a large batch of clubs so Fuse.js can search across them client-side
   const { data, isLoading } = useQuery({
-    queryKey: ["clubs", sortBy, sortOrder],
-    queryFn: () => fetchClubs({ sort_by: sortBy, sort_order: sortOrder, per_page: 200 }),
+    queryKey: ["clubs", sortBy, sortOrder, enrichedLeagues],
+    queryFn: () => fetchClubs({ sort_by: sortBy, sort_order: sortOrder, per_page: 200, leagues: enrichedLeagues }),
     placeholderData: (previousData) => previousData,
   });
 
@@ -112,9 +128,10 @@ export default function RankingsPage() {
         <div>
           <h1 className="text-3xl font-bold">Club Rankings</h1>
           <p className="text-base-content/70 mt-1">
+            Top 5 Europe + European Leagues ·
             {searchQuery.trim()
-              ? `${totalFiltered} club${totalFiltered === 1 ? "" : "s"} matching “${searchQuery}”`
-              : `${data?.total ?? "—"} clubs ranked`}
+              ? ` ${totalFiltered} club${totalFiltered === 1 ? "" : "s"} matching “${searchQuery}”`
+              : ` ${data?.total ?? ""} clubs ranked`}
           </p>
         </div>
       </div>
@@ -240,7 +257,14 @@ export default function RankingsPage() {
               </tr>
             ) : (
               pagedClubs.map((club, i) => (
-                <tr key={club.club_id} className="hover">
+                <motion.tr
+                  key={club.club_id}
+                  className="hover"
+                  custom={i}
+                  variants={rowVariants}
+                  initial="hidden"
+                  animate="visible"
+                >
                   <td className="font-mono text-xs text-base-content/50">
                     {(safePage - 1) * perPage + i + 1}
                   </td>
@@ -259,7 +283,7 @@ export default function RankingsPage() {
                     </Link>
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums">
-                    {club.composite_score?.toFixed(3) ?? "—"}
+                    {club.composite_score?.toFixed(3) ?? ""}
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums">
                     <span
@@ -269,24 +293,24 @@ export default function RankingsPage() {
                           : "text-error"
                       }
                     >
-                      {club.median_roi?.toFixed(1) ?? "—"}%
+                      {club.median_roi?.toFixed(1) ?? ""}%
                     </span>
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums text-base-content/70">
                     {club.annualized_roi
                       ? `${club.annualized_roi > 0 ? "+" : ""}${club.annualized_roi.toFixed(1)}%`
-                      : "—"}
+                      : ""}
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums">
-                    {club.hit_rate?.toFixed(1) ?? "—"}%
+                    {club.hit_rate?.toFixed(1) ?? ""}%
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums">
                     {formatEuro(club.total_profit)}
                   </td>
                   <td className="text-right font-mono text-sm tabular-nums">
-                    {club.total_transfers ?? "—"}
+                    {club.total_transfers ?? ""}
                   </td>
-                </tr>
+                </motion.tr>
               ))
             )}
           </tbody>

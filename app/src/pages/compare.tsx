@@ -3,15 +3,11 @@
  * Side-by-side comparison of two clubs.
  */
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchClubs, compareClubs } from "@/lib/api";
+import { compareClubs, clubLogoUrl, unifiedSearch } from "@/lib/api";
+import { ResponsiveRadar } from '@nivo/radar';
 import {
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-  Radar,
   ResponsiveContainer,
   Legend,
   BarChart,
@@ -24,69 +20,144 @@ import {
 
 function formatEuro(value: number | null | undefined): string {
   if (value === null || value === undefined) return "€0";
+  const sign = value < 0 ? "-" : "";
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `€${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `€${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `€${(abs / 1_000).toFixed(1)}K`;
-  return `€${abs.toFixed(0)}`;
+  if (abs >= 1_000_000_000) return `${sign}€${(abs / 1_000_000_000).toFixed(1)}B`;
+  if (abs >= 1_000_000) return `${sign}€${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}€${(abs / 1_000).toFixed(1)}K`;
+  return `${sign}€${abs.toFixed(0)}`;
 }
 
 function ClubSelector({
   label,
   value,
-  onChange,
+  onSelect,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
+  value: number | null;
+  onSelect: (id: number | null, name: string | null) => void;
 }) {
-  const { data: searchResults } = useQuery({
-    queryKey: ["club-search", value],
-    queryFn: () => fetchClubs({ sort_by: "composite_score", sort_order: "desc", per_page: 20 }),
-    enabled: value.length > 0,
-  });
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<{ id: number; name: string; subtitle: string | null }[]>([]);
+  const [open, setOpen] = useState(false);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleChange = (val: string) => {
+    setQuery(val);
+    setSelectedLabel(null);
+    if (val.trim().length < 1) {
+      setResults([]);
+      setOpen(false);
+      return;
+    }
+
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
+      try {
+        const data = await unifiedSearch(val.trim(), 10);
+        const clubs = data.results.filter((r) => r.type === "club");
+        setResults(clubs);
+        setOpen(clubs.length > 0);
+      } catch {
+        setResults([]);
+      }
+    }, 300);
+  };
+
+  const pick = (item: { id: number; name: string }) => {
+    setQuery("");
+    setResults([]);
+    setOpen(false);
+    setSelectedLabel(item.name);
+    onSelect(item.id, item.name);
+  };
+
+  const clear = () => {
+    setQuery("");
+    setResults([]);
+    setOpen(false);
+    setSelectedLabel(null);
+    onSelect(null, null);
+  };
 
   return (
     <div className="form-control w-full">
       <label className="label">
         <span className="label-text">{label}</span>
       </label>
-      <input
-        type="text"
-        placeholder="Type a club name..."
-        className="input input-bordered w-full"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        list={`clubs-${label}`}
-      />
-      <datalist id={`clubs-${label}`}>
-        {searchResults?.clubs.map((c) => (
-          <option key={c.club_id} value={c.name}>
-            {c.name}
-          </option>
-        ))}
-      </datalist>
+      <div className="relative">
+        {selectedLabel ? (
+          <div className="flex items-center gap-1.5 input input-bordered w-full pr-1">
+            <span className="truncate text-sm">{selectedLabel}</span>
+            <button onClick={clear} className="btn btn-ghost btn-xs btn-square shrink-0 ml-auto">
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <input
+            type="text"
+            className="input input-bordered w-full"
+            placeholder="Search clubs…"
+            value={query}
+            onChange={(e) => handleChange(e.target.value)}
+            onFocus={() => { if (results.length > 0) setOpen(true); }}
+            onBlur={() => setTimeout(() => setOpen(false), 200)}
+          />
+        )}
+
+        {open && results.length > 0 && (
+          <div className="absolute top-full left-0 mt-1 w-full z-20 bg-base-100 border border-base-300 rounded-xl shadow-xl max-h-48 overflow-y-auto">
+            {results.map((item) => (
+              <button
+                key={item.id}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-base-200 transition-colors flex items-center gap-2"
+                onMouseDown={() => pick(item)}
+              >
+                <img
+                  src={clubLogoUrl(item.id) ?? ""}
+                  alt=""
+                  className="w-4 h-4 object-contain shrink-0"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+                <span className="font-medium">{item.name}</span>
+                {item.subtitle && (
+                  <span className="text-xs text-base-content/50 ml-auto">{item.subtitle}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
+function useResolvedColor(cssVar: string, fallback: string): string {
+  const [color, setColor] = useState(fallback);
+  useEffect(() => {
+    function resolve() {
+      if (typeof document === 'undefined') return;
+      const raw = getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim();
+      if (raw) setColor(`oklch(${raw})`);
+    }
+    resolve();
+    // Re-resolve when theme changes (data-theme attribute on <html>)
+    const observer = new MutationObserver(resolve);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, [cssVar]);
+  return color;
+}
+
 export default function ComparePage() {
-  const [club1Name, setClub1Name] = useState("");
-  const [club2Name, setClub2Name] = useState("");
   const [club1Id, setClub1Id] = useState<number | null>(null);
   const [club2Id, setClub2Id] = useState<number | null>(null);
 
-  const { data: clubs } = useQuery({
-    queryKey: ["compare-clubs"],
-    queryFn: () => fetchClubs({ sort_by: "composite_score", per_page: 200 }),
-  });
-
-  const handleSelect = (name: string, setter: (id: number | null) => void) => {
-    const match = clubs?.clubs.find(
-      (c) => c.name.toLowerCase() === name.toLowerCase()
-    );
-    if (match) setter(match.club_id);
-  };
+  const resolvedPrimary = useResolvedColor('--p', '#3b82f6');
+  const resolvedSecondary = useResolvedColor('--s', '#8b5cf6');
 
   const { data: comparison, isLoading } = useQuery({
     queryKey: ["comparison", club1Id, club2Id],
@@ -114,8 +185,8 @@ export default function ComparePage() {
 
       {/* Club Selectors */}
       <div className="grid md:grid-cols-2 gap-4">
-        <ClubSelector label="Club 1" value={club1Name} onChange={(v) => { setClub1Name(v); handleSelect(v, setClub1Id); }} />
-        <ClubSelector label="Club 2" value={club2Name} onChange={(v) => { setClub2Name(v); handleSelect(v, setClub2Id); }} />
+        <ClubSelector label="Club 1" value={club1Id} onSelect={(id) => setClub1Id(id)} />
+        <ClubSelector label="Club 2" value={club2Id} onSelect={(id) => setClub2Id(id)} />
       </div>
 
       {!comparison && !isLoading && (
@@ -135,29 +206,72 @@ export default function ComparePage() {
           {/* Radar Chart */}
           <section>
             <h2 className="text-xl font-bold mb-4">Metrics Overview</h2>
-            <div className="bg-base-200 rounded-xl p-4">
-              <ResponsiveContainer width="100%" height={350}>
-                <RadarChart data={radarData}>
-                  <PolarGrid stroke="hsl(var(--bc) / 0.15)" />
-                  <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12 }} />
-                  <PolarRadiusAxis angle={30} domain={[0, "auto"]} tick={false} />
-                  <Radar
-                    name={comparison.club1.name}
-                    dataKey={comparison.club1.name}
-                    stroke="hsl(var(--p))"
-                    fill="hsl(var(--p))"
-                    fillOpacity={0.2}
-                  />
-                  <Radar
-                    name={comparison.club2.name}
-                    dataKey={comparison.club2.name}
-                    stroke="hsl(var(--s))"
-                    fill="hsl(var(--s))"
-                    fillOpacity={0.2}
-                  />
-                  <Legend />
-                </RadarChart>
-              </ResponsiveContainer>
+            <div className="bg-base-200 rounded-xl p-4" style={{ height: 400 }}>
+              <ResponsiveRadar
+                key={resolvedPrimary + resolvedSecondary}
+                data={radarData}
+                keys={[comparison.club1.name, comparison.club2.name]}
+                indexBy="metric"
+                valueFormat=" >+.0f"
+                margin={{ top: 40, right: 80, bottom: 40, left: 80 }}
+                colors={[resolvedPrimary, resolvedSecondary]}
+                borderWidth={2}
+                borderColor={{ from: 'color' }}
+                fillOpacity={0.15}
+                gridLevels={4}
+                gridShape="linear"
+                gridLabelOffset={12}
+                enableDots={true}
+                dotSize={8}
+                dotColor={{ from: 'color' }}
+                dotBorderWidth={2}
+                dotBorderColor={{ from: 'color', modifiers: [['darker', 0.5]] }}
+                enableDotLabel={false}
+                animate={true}
+                motionConfig="gentle"
+                theme={{
+                  background: 'transparent',
+                  text: { fill: 'oklch(var(--bc) / 0.7)', fontSize: 12 },
+                  axis: {
+                    ticks: { text: { fill: 'oklch(var(--bc) / 0.5)', fontSize: 11 } },
+                    legend: { text: { fill: 'oklch(var(--bc))', fontSize: 12 } },
+                  },
+                  grid: {
+                    line: { stroke: 'oklch(var(--bc) / 0.25)', strokeWidth: 1 },
+                  },
+                  dots: {
+                    text: { fill: 'oklch(var(--bc) / 0.7)' },
+                  },
+                  tooltip: {
+                    container: {
+                      background: 'oklch(var(--b1))',
+                      border: '1px solid oklch(var(--bc) / 0.2)',
+                      borderRadius: '8px',
+                      fontSize: 13,
+                      boxShadow: '0 4px 12px oklch(0 0 0 / 0.15)',
+                    },
+                  },
+                }}
+                legends={[
+                  {
+                    anchor: 'bottom-right',
+                    direction: 'column',
+                    translateX: -200,
+                    translateY: -100,
+                    itemWidth: 140,
+                    itemHeight: 24,
+                    itemTextColor: 'oklch(var(--bc) / 0.8)',
+                    symbolSize: 10,
+                    symbolShape: 'circle',
+                    effects: [
+                      {
+                        on: 'hover',
+                        style: { itemTextColor: 'oklch(var(--bc))' },
+                      },
+                    ],
+                  },
+                ]}
+              />
             </div>
           </section>
 
@@ -180,12 +294,12 @@ export default function ComparePage() {
                     { label: "Total Profit", v1: formatEuro(comparison.club1.total_profit), v2: formatEuro(comparison.club2.total_profit) },
                     { label: "Hit Rate %", v1: comparison.club1.hit_rate?.toFixed(1) + "%", v2: comparison.club2.hit_rate?.toFixed(1) + "%" },
                     { label: "Value Creation %", v1: comparison.club1.value_creation?.toFixed(1) + "%", v2: comparison.club2.value_creation?.toFixed(1) + "%" },
-                    { label: "Transfers", v1: String(comparison.club1.total_transfers ?? "—"), v2: String(comparison.club2.total_transfers ?? "—") },
+                    { label: "Transfers", v1: String(comparison.club1.total_transfers ?? ""), v2: String(comparison.club2.total_transfers ?? "") },
                   ].map((row) => (
                     <tr key={row.label} className="hover">
                       <td className="font-medium">{row.label}</td>
-                      <td className="text-right font-mono">{row.v1 ?? "—"}</td>
-                      <td className="text-right font-mono">{row.v2 ?? "—"}</td>
+                      <td className="text-right font-mono">{row.v1 ?? ""}</td>
+                      <td className="text-right font-mono">{row.v2 ?? ""}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -199,19 +313,21 @@ export default function ComparePage() {
             <div className="bg-base-200 rounded-xl p-4">
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={radarData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--bc) / 0.1)" />
-                  <XAxis dataKey="metric" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="oklch(var(--bc) / 0.15)" />
+                  <XAxis dataKey="metric" tick={{ fontSize: 12 }} stroke="oklch(var(--bc) / 0.4)" />
+                  <YAxis tick={{ fontSize: 12 }} stroke="oklch(var(--bc) / 0.4)" />
                   <Tooltip
                     contentStyle={{
-                      background: "hsl(var(--b1))",
-                      border: "1px solid hsl(var(--bc) / 0.2)",
+                      background: "oklch(var(--b1))",
+                      border: "1px solid oklch(var(--bc) / 0.2)",
                       borderRadius: "8px",
                     }}
                   />
-                  <Legend />
-                  <Bar dataKey={comparison.club1.name} fill="hsl(var(--p))" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey={comparison.club2.name} fill="hsl(var(--s))" radius={[4, 4, 0, 0]} />
+                  <Legend
+                    wrapperStyle={{ fontSize: 12, color: 'oklch(var(--bc) / 0.8)' }}
+                  />
+                  <Bar dataKey={comparison.club1.name} fill={resolvedPrimary} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={comparison.club2.name} fill={resolvedSecondary} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
