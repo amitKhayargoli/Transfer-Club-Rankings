@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response serialization.
 """
 
-from datetime import date
+import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -21,6 +21,8 @@ class ClubBase(BaseModel):
     total_profit: Optional[float] = None
     hit_rate: Optional[float] = None
     value_creation: Optional[float] = None
+    profit_per_deal: Optional[float] = None
+    buying_club_premium: Optional[float] = None
     composite_score: Optional[float] = None
 
     model_config = {"from_attributes": True}
@@ -49,7 +51,7 @@ class PlayerBase(BaseModel):
     player_id: int
     name: str
     position: Optional[str] = None
-    date_of_birth: Optional[date] = None
+    date_of_birth: Optional[datetime.date] = None
     current_club_id: Optional[int] = None
     current_club_name: Optional[str] = None
     market_value_in_eur: Optional[float] = None
@@ -63,9 +65,11 @@ class PlayerDetailResponse(PlayerBase):
     highest_market_value_in_eur: Optional[float] = None
 
 
-class PlayerSearchResponse(BaseModel):
+class PlayerListResponse(BaseModel):
     players: list[PlayerBase]
     total: int
+    page: int
+    per_page: int
 
 
 # ── Transfer Schemas ────────────────────────────────────────────────────────
@@ -78,7 +82,7 @@ class TransferBase(BaseModel):
     to_club_id: Optional[int] = None
     from_club_name: Optional[str] = None
     to_club_name: Optional[str] = None
-    transfer_date: Optional[date] = None
+    transfer_date: Optional[datetime.date] = None
     transfer_fee: Optional[float] = None
     buy_fee: Optional[float] = None
     sell_fee: Optional[float] = None
@@ -102,7 +106,7 @@ class TransferListResponse(BaseModel):
 # ── Player Valuation Schemas ────────────────────────────────────────────────
 
 class PlayerValuationBase(BaseModel):
-    date: Optional[date] = None
+    date: Optional[datetime.date] = None
     market_value_in_eur: Optional[float] = None
 
     model_config = {"from_attributes": True}

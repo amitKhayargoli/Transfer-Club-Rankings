@@ -1,5 +1,5 @@
 """
-Analytics pipeline — computes buy-sell pairs, ROI metrics, and club composite scores.
+Analytics pipeline  computes buy-sell pairs, ROI metrics, and club composite scores.
 
 This is the core business logic that:
 1. Matches buy and sell transfers for each player per club
@@ -109,11 +109,18 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     pairs["tenure_days"] = (pd.to_datetime(pairs["sell_date"]) - pd.to_datetime(pairs["buy_date"])).dt.days
     pairs["tenure_years"] = pairs["tenure_days"] / 365.25
 
-    # Annualized ROI
+    # Annualized ROI - guard against overflow on quick flips
     def _calc_annualized(row):
         if row["tenure_years"] > 0 and row["buy_fee"] > 0:
+            # Minimum tenure of 7 days to avoid numerical overflow from extreme exponents
+            effective_years = max(row["tenure_years"], 7 / 365.25)
             ratio = row["sell_fee"] / row["buy_fee"]
-            return (ratio ** (1.0 / row["tenure_years"])) - 1
+            try:
+                result = (ratio ** (1.0 / effective_years)) - 1
+                # Cap at ±500% to prevent absurd annualized values from quick flips
+                return max(min(result, 5.0), -5.0)
+            except (OverflowError, ValueError):
+                return None
         return None
 
     pairs["annualized_roi_pct"] = pairs.apply(_calc_annualized, axis=1) * 100
@@ -142,7 +149,7 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     pairs["player_name"] = pairs["player_id"].map(lambda pid: player_info.get(pid, {}).get("name"))
     pairs["player_position"] = pairs["player_id"].map(lambda pid: player_info.get(pid, {}).get("position"))
 
-    # Write back computed fields to Transfer rows — on BOTH buy and sell sides
+    # Write back computed fields to Transfer rows  on BOTH buy and sell sides
     pair_count = 0
     for _, pair in pairs.iterrows():
         buy_id = pair.get("buy_transfer_id") or pair.get("sell_transfer_id")

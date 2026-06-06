@@ -28,7 +28,7 @@ def classify_transfer(t: TransferBase) -> str:
     Returns one of: "paid", "contract_expired", "retired",
                     "youth_promotion", "free_transfer", "loan_return"
     """
-    # Paid transfers — always a "paid transfer"
+    # Paid transfers  always a "paid transfer"
     if t.transfer_fee and t.transfer_fee > 0:
         return "paid"
 

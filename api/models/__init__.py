@@ -28,6 +28,8 @@ class Club(Base):
     total_profit: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     hit_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     value_creation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    profit_per_deal: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    buying_club_premium: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     composite_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_updated: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
