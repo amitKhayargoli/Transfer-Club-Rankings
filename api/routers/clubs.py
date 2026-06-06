@@ -97,7 +97,8 @@ router = APIRouter(prefix="/api/clubs", tags=["clubs"])
 
 @router.get("", response_model=ClubListResponse)
 async def list_clubs(
-    league: Optional[str] = Query(None, description="Filter by league (domestic_competition_id)"),
+    league: Optional[str] = Query(None, description="Filter by single league (domestic_competition_id)"),
+    leagues: Optional[str] = Query(None, description="Filter by comma-separated league IDs, e.g. 'GB1,FR1,ES1'"),
     min_transfers: int = Query(MIN_TRANSFERS, description="Minimum transfers threshold"),
     sort_by: str = Query("composite_score", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order: asc or desc"),
@@ -111,6 +112,9 @@ async def list_clubs(
 
     if league:
         query = query.where(Club.domestic_competition_id == league)
+    elif leagues:
+        league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
+        query = query.where(Club.domestic_competition_id.in_(league_ids))
 
     # Apply year filters on transfers count (only clubs with transfers in range)
     if year_from or year_to:
@@ -168,6 +172,68 @@ async def compare_clubs(
     return ClubCompareResponse(
         club1=ClubDetailResponse.model_validate(club1),
         club2=ClubDetailResponse.model_validate(club2),
+    )
+
+
+@router.get("/sell-leaders", response_model=ClubListResponse)
+async def list_sell_leaders(
+    league: Optional[str] = Query(None, description="Filter by league"),
+    min_transfers: int = Query(3, description="Minimum transfers threshold"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clubs ranked by total profit from selling players."""
+    query = select(Club)
+    if league:
+        query = query.where(Club.domestic_competition_id == league)
+    query = query.where(Club.total_profit.isnot(None), Club.total_transfers >= min_transfers)
+    query = query.order_by(Club.total_profit.desc().nullslast())
+
+    total_q = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(total_q)
+    total = total_result.scalar() or 0
+
+    query = query.offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(query)
+    clubs = result.scalars().all()
+
+    return ClubListResponse(
+        clubs=[ClubBase.model_validate(c) for c in clubs],
+        total=total,
+        page=page,
+        per_page=per_page,
+    )
+
+
+@router.get("/academy-leaders", response_model=ClubListResponse)
+async def list_academy_leaders(
+    league: Optional[str] = Query(None, description="Filter by league"),
+    min_transfers: int = Query(3, description="Minimum transfers threshold"),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clubs ranked by value creation (developing talent and selling high)."""
+    query = select(Club)
+    if league:
+        query = query.where(Club.domestic_competition_id == league)
+    query = query.where(Club.value_creation.isnot(None), Club.total_transfers >= min_transfers)
+    query = query.order_by(Club.value_creation.desc().nullslast())
+
+    total_q = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(total_q)
+    total = total_result.scalar() or 0
+
+    query = query.offset((page - 1) * per_page).limit(per_page)
+    result = await db.execute(query)
+    clubs = result.scalars().all()
+
+    return ClubListResponse(
+        clubs=[ClubBase.model_validate(c) for c in clubs],
+        total=total,
+        page=page,
+        per_page=per_page,
     )
 
 

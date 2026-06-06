@@ -5,7 +5,7 @@ Unified search endpoint.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select, union, literal_column
+from sqlalchemy import select, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
@@ -23,7 +23,7 @@ async def unified_search(
 ):
     pattern = f"%{q}%"
 
-    # Search clubs
+    # Search clubs (separate query - SQLite doesn't support UNION with LIMIT)
     club_q = select(
         literal_column("'club'").label("type"),
         Club.club_id.label("id"),
@@ -31,7 +31,10 @@ async def unified_search(
         Club.domestic_competition_id.label("subtitle"),
     ).where(Club.name.ilike(pattern)).limit(limit)
 
-    # Search players
+    club_result = await db.execute(club_q)
+    club_rows = club_result.all()
+
+    # Search players (separate query)
     player_q = select(
         literal_column("'player'").label("type"),
         Player.player_id.label("id"),
@@ -39,9 +42,11 @@ async def unified_search(
         Player.position.label("subtitle"),
     ).where(Player.name.ilike(pattern)).limit(limit)
 
-    union_q = union(club_q, player_q).limit(limit)
-    result = await db.execute(union_q)
-    rows = result.all()
+    player_result = await db.execute(player_q)
+    player_rows = player_result.all()
+
+    # Combine and limit results
+    rows = (club_rows + player_rows)[:limit]
 
     return SearchResponse(
         results=[

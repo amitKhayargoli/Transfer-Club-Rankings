@@ -9,11 +9,11 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import Player, Transfer, PlayerValuation
+from api.models import Club, Player, Transfer, PlayerValuation
 from api.schemas import (
     PlayerBase,
     PlayerDetailResponse,
-    PlayerSearchResponse,
+    PlayerListResponse,
     TransferBase,
     PlayerValuationBase,
 )
@@ -24,35 +24,59 @@ from api.utils import classify_transfer, detect_loans
 router = APIRouter(prefix="/api/players", tags=["players"])
 
 
-@router.get("", response_model=PlayerSearchResponse)
-async def search_players(
+@router.get("", response_model=PlayerListResponse)
+async def list_players(
     q: Optional[str] = Query(None, description="Search query (fuzzy match on name)"),
     position: Optional[str] = Query(None, description="Filter by position"),
     club_id: Optional[int] = Query(None, description="Filter by current club"),
-    limit: int = Query(50, ge=1, le=200),
+    league: Optional[str] = Query(None, description="Filter by league (domestic_competition_id)"),
+    sort_by: str = Query("market_value_in_eur", description="Field to sort by"),
+    sort_order: str = Query("desc", description="Sort direction: asc or desc"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(50, ge=1, le=200, description="Items per page"),
     db: AsyncSession = Depends(get_db),
 ):
+    # Allowlist of safe sort fields
+    ALLOWED_SORT_FIELDS = {"market_value_in_eur", "name", "position", "date_of_birth", "current_club_name"}
+    if sort_by not in ALLOWED_SORT_FIELDS:
+        sort_by = "market_value_in_eur"
+
     query = select(Player)
 
+    # Build the base query with filters
     if q:
         query = query.where(Player.name.ilike(f"%{q}%"))
     if position:
         query = query.where(Player.position == position)
     if club_id:
         query = query.where(Player.current_club_id == club_id)
+    if league:
+        query = query.join(Club, Player.current_club_id == Club.club_id).where(
+            Club.domestic_competition_id == league
+        )
 
-    query = query.order_by(Player.name).limit(limit)
+    # Sort by requested field
+    sort_col = getattr(Player, sort_by, Player.market_value_in_eur)
+    if sort_order == "asc":
+        query = query.order_by(sort_col.asc().nullslast())
+    else:
+        query = query.order_by(sort_col.desc().nullslast())
 
+    # Total count
     total_q = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(total_q)
     total = total_result.scalar() or 0
 
+    # Paginate
+    query = query.offset((page - 1) * per_page).limit(per_page)
     result = await db.execute(query)
     players = result.scalars().all()
 
-    return PlayerSearchResponse(
+    return PlayerListResponse(
         players=[PlayerBase.model_validate(p) for p in players],
         total=total,
+        page=page,
+        per_page=per_page,
     )
 
 

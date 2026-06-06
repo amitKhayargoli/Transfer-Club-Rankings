@@ -7,9 +7,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from api.database import get_db
-from api.models import Transfer
+from api.models import Club, Transfer
 from api.schemas import TransferBase, TransferListResponse
 
 router = APIRouter(prefix="/api/transfers", tags=["transfers"])
@@ -17,8 +18,10 @@ router = APIRouter(prefix="/api/transfers", tags=["transfers"])
 
 @router.get("", response_model=TransferListResponse)
 async def list_transfers(
+    q: Optional[str] = Query(None, description="Search by player name"),
     club_id: Optional[int] = Query(None, description="Filter by club (buying or selling)"),
     position: Optional[str] = Query(None, description="Filter by player position"),
+    league: Optional[str] = Query(None, description="Filter by league (domestic competition ID)"),
     min_roi: Optional[float] = Query(None, description="Minimum ROI percentage"),
     year_from: Optional[int] = Query(None, description="Start year"),
     year_to: Optional[int] = Query(None, description="End year"),
@@ -28,12 +31,19 @@ async def list_transfers(
 ):
     query = select(Transfer)
 
+    if q:
+        query = query.where(Transfer.player_name.ilike(f"%{q}%"))
     if club_id:
         query = query.where(
             (Transfer.from_club_id == club_id) | (Transfer.to_club_id == club_id)
         )
     if position:
         query = query.where(Transfer.player_position == position)
+    if league:
+        # Join with Club to filter by domestic competition
+        query = query.where(
+            (Transfer.from_club_id == Club.club_id) | (Transfer.to_club_id == Club.club_id)
+        ).where(Club.domestic_competition_id == league).distinct()
     if min_roi is not None:
         query = query.where(Transfer.roi_pct >= min_roi)
     if year_from:

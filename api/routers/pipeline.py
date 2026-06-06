@@ -1,5 +1,5 @@
 """
-Pipeline API endpoints — trigger data loading and check status.
+Pipeline API endpoints  trigger data loading and check status.
 """
 
 import logging
