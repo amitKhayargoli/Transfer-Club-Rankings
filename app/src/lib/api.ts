@@ -20,6 +20,8 @@ export interface Club {
   median_roi: number | null;
   annualized_roi: number | null;
   total_profit: number | null;
+  profit_per_deal: number | null;
+  buying_club_premium: number | null;
   hit_rate: number | null;
   value_creation: number | null;
   composite_score: number | null;
@@ -32,6 +34,12 @@ export interface Club {
 export function clubLogoUrl(clubId: number | null | undefined, size: 'head' | 'medium' | 'tiny' = 'medium'): string | null {
   if (!clubId) return null;
   return `https://tmssl.akamaized.net/images/wappen/${size}/${clubId}.png`;
+}
+
+// Build player image URL from player_id using Transfermarkt CDN
+export function playerImageUrl(playerId: number | null | undefined, size: 'small' | 'medium' | 'big' | 'original' = 'medium'): string | null {
+  if (!playerId) return null;
+  return `https://tmssl.akamaized.net/images/fotos/${size}/${playerId}.jpg`;
 }
 
 // Build league logo URL from competition ID
@@ -61,6 +69,13 @@ export interface PlayerDetail extends Player {
   foot: string | null;
   height_in_cm: number | null;
   highest_market_value_in_eur: number | null;
+}
+
+export interface PlayerListResponse {
+  players: Player[];
+  total: number;
+  page: number;
+  per_page: number;
 }
 
 export interface Transfer {
@@ -136,6 +151,7 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 
 export function fetchClubs(params?: {
   league?: string;
+  leagues?: string;
   min_transfers?: number;
   sort_by?: string;
   sort_order?: string;
@@ -144,6 +160,7 @@ export function fetchClubs(params?: {
 }) {
   const search = new URLSearchParams();
   if (params?.league) search.set("league", params.league);
+  if (params?.leagues) search.set("leagues", params.leagues);
   if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
   if (params?.sort_by) search.set("sort_by", params.sort_by);
   if (params?.sort_order) search.set("sort_order", params.sort_order);
@@ -151,6 +168,34 @@ export function fetchClubs(params?: {
   if (params?.per_page) search.set("per_page", String(params.per_page));
   const qs = search.toString();
   return apiFetch<ClubListResponse>(`/clubs${qs ? `?${qs}` : ""}`);
+}
+
+export function fetchSellLeaders(params?: {
+  league?: string;
+  min_transfers?: number;
+  page?: number;
+  per_page?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params?.league) search.set("league", params.league);
+  if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.per_page) search.set("per_page", String(params.per_page));
+  return apiFetch<ClubListResponse>(`/clubs/sell-leaders?${search.toString()}`);
+}
+
+export function fetchAcademyLeaders(params?: {
+  league?: string;
+  min_transfers?: number;
+  page?: number;
+  per_page?: number;
+}) {
+  const search = new URLSearchParams();
+  if (params?.league) search.set("league", params.league);
+  if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.per_page) search.set("per_page", String(params.per_page));
+  return apiFetch<ClubListResponse>(`/clubs/academy-leaders?${search.toString()}`);
 }
 
 export function fetchClub(id: number) {
@@ -171,13 +216,27 @@ export function compareClubs(ids: [number, number]) {
 
 // ── Player endpoints ────────────────────────────────────────────────────
 
-export function searchPlayers(params?: { q?: string; position?: string; club_id?: number }) {
+export function searchPlayers(params?: {
+  q?: string;
+  position?: string;
+  club_id?: number;
+  league?: string;
+  sort_by?: string;
+  sort_order?: string;
+  page?: number;
+  per_page?: number;
+}) {
   const search = new URLSearchParams();
   if (params?.q) search.set("q", params.q);
   if (params?.position) search.set("position", params.position);
   if (params?.club_id) search.set("club_id", String(params.club_id));
+  if (params?.league) search.set("league", params.league);
+  if (params?.sort_by) search.set("sort_by", params.sort_by);
+  if (params?.sort_order) search.set("sort_order", params.sort_order);
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.per_page) search.set("per_page", String(params.per_page));
   const qs = search.toString();
-  return apiFetch<{ players: Player[]; total: number }>(`/players${qs ? `?${qs}` : ""}`);
+  return apiFetch<PlayerListResponse>(`/players${qs ? `?${qs}` : ""}`);
 }
 
 export function fetchPlayer(id: number) {
@@ -197,8 +256,10 @@ export function fetchPlayerValuations(id: number) {
 // ── Transfer endpoints ──────────────────────────────────────────────────
 
 export function fetchTransfers(params?: {
+  q?: string;
   club_id?: number;
   position?: string;
+  league?: string;
   min_roi?: number;
   year_from?: number;
   year_to?: number;
@@ -206,8 +267,10 @@ export function fetchTransfers(params?: {
   per_page?: number;
 }) {
   const search = new URLSearchParams();
+  if (params?.q) search.set("q", params.q);
   if (params?.club_id) search.set("club_id", String(params.club_id));
   if (params?.position) search.set("position", params.position);
+  if (params?.league) search.set("league", params.league);
   if (params?.min_roi !== undefined) search.set("min_roi", String(params.min_roi));
   if (params?.year_from) search.set("year_from", String(params.year_from));
   if (params?.year_to) search.set("year_to", String(params.year_to));
