@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import API_HOST, API_PORT
 from api.database import init_db
-from api.routers import clubs, players, transfers, dashboard, pipeline, search
+from api.routers import clubs, players, transfers, dashboard, pipeline, search, leagues
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,7 +44,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend dev server
+# CORS  allow frontend dev server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, restrict to your frontend domain
@@ -60,6 +60,7 @@ app.include_router(transfers.router)
 app.include_router(dashboard.router)
 app.include_router(pipeline.router)
 app.include_router(search.router)
+app.include_router(leagues.router)
 
 
 @app.get("/")
@@ -76,6 +77,7 @@ async def root():
             "top_clubs": "/api/dashboard/top-clubs",
             "pipeline": "/api/pipeline/run",
             "search": "/api/search?q=",
+            "leagues": "/api/leagues/spending",
         },
     }
 
