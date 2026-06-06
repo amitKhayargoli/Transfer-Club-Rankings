@@ -1,8 +1,8 @@
 """
 Build a knowledge graph from the Transfer Club Rankings project conversation.
 Generates:
-  1. knowledge_graph.json — structured nodes + edges
-  2. knowledge_graph.html — interactive vis.js visualization
+  1. knowledge_graph.json  structured nodes + edges
+  2. knowledge_graph.html  interactive vis.js visualization
 """
 
 import json
@@ -29,7 +29,7 @@ nodes = [
     {"id": "app_player_detail", "label": "app/src/pages/players/[id].tsx", "group": "file", "title": "Player detail page with badges"},
     {"id": "app_index", "label": "app/src/pages/index.tsx", "group": "file", "title": "Dashboard page"},
     {"id": "app_lib_api", "label": "app/src/lib/api.ts", "group": "file", "title": "API client + TypeScript interfaces"},
-    {"id": "audit_md", "label": "audit.md", "group": "file", "title": "Project audit — all changes documented"},
+    {"id": "audit_md", "label": "audit.md", "group": "file", "title": "Project audit  all changes documented"},
 
     # ── Config Values ────────────────────────
     {"id": "MIN_TRANSFERS", "label": "MIN_TRANSFERS=3", "group": "config", "title": "Min matched pairs to score a club (was 5→2→3)"},
@@ -86,10 +86,29 @@ nodes = [
     {"id": "ewenme_transfers", "label": "ewenme/transfers (alt)", "group": "dataset", "title": "Alternative: European league transfers since 1992"},
 
     # ── Frontend Pages ──────────────────────
-    {"id": "page_club_detail", "label": "Club Detail Page", "group": "page", "title": "/clubs/[id] — badges, sort, filter chips"},
-    {"id": "page_player_detail", "label": "Player Detail Page", "group": "page", "title": "/players/[id] — badges, market value chart"},
-    {"id": "page_rankings", "label": "Rankings Page", "group": "page", "title": "/rankings — 135 clubs sorted by score"},
-    {"id": "page_dashboard", "label": "Dashboard", "group": "page", "title": "/ — overview stats"},
+    {"id": "page_club_detail", "label": "Club Detail Page", "group": "page", "title": "/clubs/[id]  badges, sort, filter chips"},
+    {"id": "page_player_detail", "label": "Player Detail Page", "group": "page", "title": "/players/[id]  badges, market value chart"},
+    {"id": "page_rankings", "label": "Rankings Page", "group": "page", "title": "/rankings  135 clubs sorted by score"},
+    {"id": "page_dashboard", "label": "Dashboard", "group": "page", "title": "/  overview stats"},
+
+    # ── Session 2: Enrichment Pipeline & ETA ─
+    {"id": "enrich_data_py", "label": "scripts/enrich_data.py", "group": "file", "title": "Main enrichment script with ETA display"},
+    {"id": "RATE_LIMIT_1S", "label": "Rate Limit = 1.0s", "group": "config", "title": "Default rate limit changed from 2.5s→1.0s"},
+    {"id": "eta_display", "label": "ETA Progress Display", "group": "feature", "title": "Shows remaining time (Xh Ym) every 10 players in enrichment log"},
+    {"id": "233_clubs_scored", "label": "233 Clubs Scored", "group": "pipeline", "title": "233 clubs with composite scores after full enrichment"},
+    {"id": "2848_pairs", "label": "2,848 Buy-Sell Pairs", "group": "pipeline", "title": "Total computed buy-sell pairs after enrichment + analytics"},
+    {"id": "top5_fully_enriched", "label": "Top 5 Leagues 100%", "group": "pipeline", "title": "22 remaining players enriched. PL/LaLiga/SA/BL/L1 now fully complete"},
+    {"id": "po1_gap", "label": "PO1: 1,888 Missing", "group": "data_issue", "title": "Liga Portugal: 82.4% of 2,292 active players still need scraping"},
+    {"id": "nl1_gap", "label": "NL1: 1,662 Missing", "group": "data_issue", "title": "Eredivisie: 85.1% of 1,952 active players still need scraping"},
+    {"id": "other_leagues_gap", "label": "Other EU: 14K Missing", "group": "data_issue", "title": "TR1, GR1, RU1, BE1, SC1, A1, DK1, PL1, etc. ~14K players total"},
+    {"id": "sell_league_recommendation", "label": "Scrape PO1→NL1→BE1→A1", "group": "feature", "title": "Decision: Only selling leagues (Portugal, Eredivisie, Belgium, Austria) are worth scraping"},
+    {"id": "skip_buyer_leagues", "label": "Skip TR1/GR1/RU1/SC1", "group": "feature", "title": "Decision: Turkish, Greek, Russian, Scottish leagues are net buyers, not worth scraping"},
+    {"id": "brentford", "label": "Brentford", "group": "club", "title": "#20 overall, top PL club: 11 pairs, €199M profit, 367% median ROI"},
+    {"id": "famalicao", "label": "Famalicão", "group": "club", "title": "#10 overall, top PO1 club: 6 pairs, €53.6M profit, 100% hit rate"},
+    {"id": "lecce", "label": "Lecce", "group": "club", "title": "#12 overall, top IT1 club: 16 pairs, €101.7M profit, 100% hit rate"},
+    {"id": "brighton", "label": "Brighton", "group": "club", "title": "#3 sell leader: 26 pairs, €273M profit (PL's best seller)"},
+    {"id": "dortmund", "label": "Borussia Dortmund", "group": "club", "title": "#1 sell leader: 21 pairs, €302M profit"},
+    {"id": "ajax", "label": "Ajax", "group": "club", "title": "#8 sell leader: 23 pairs, €204M profit (Eredivisie's best seller)"},
 ]
 
 # ──────────────────────────────────────────────
@@ -194,6 +213,51 @@ edges = [
     # API client → Frontend
     {"from": "app_lib_api", "to": "app_club_detail", "label": "used by"},
     {"from": "app_lib_api", "to": "app_player_detail", "label": "used by"},
+
+    # ── Session 2 Edges ──────────────────────
+
+    # Config → File
+    {"from": "RATE_LIMIT_1S", "to": "enrich_data_py", "label": "configured in"},
+    {"from": "eta_display", "to": "enrich_data_py", "label": "implemented in"},
+
+    # Stats → Pipeline
+    {"from": "233_clubs_scored", "to": "compute_club_metrics", "label": "produced by"},
+    {"from": "2848_pairs", "to": "compute_buy_sell_pairs", "label": "produced by"},
+    {"from": "top5_fully_enriched", "to": "enrich_data_py", "label": "completed by"},
+
+    # Data gaps → Enrichment
+    {"from": "po1_gap", "to": "top5_fully_enriched", "label": "next after"},
+    {"from": "nl1_gap", "to": "po1_gap", "label": "next after"},
+    {"from": "other_leagues_gap", "to": "nl1_gap", "label": "bigger pool"},
+
+    # Decisions
+    {"from": "sell_league_recommendation", "to": "po1_gap", "label": "addresses"},
+    {"from": "sell_league_recommendation", "to": "nl1_gap", "label": "addresses"},
+    {"from": "skip_buyer_leagues", "to": "other_leagues_gap", "label": "skips"},
+
+    # Updated clubs → metrics
+    {"from": "brentford", "to": "compute_club_metrics", "label": "scored by"},
+    {"from": "famalicao", "to": "compute_club_metrics", "label": "scored by"},
+    {"from": "lecce", "to": "compute_club_metrics", "label": "scored by"},
+    {"from": "brighton", "to": "compute_club_metrics", "label": "scored by"},
+    {"from": "dortmund", "to": "compute_club_metrics", "label": "scored by"},
+    {"from": "ajax", "to": "compute_club_metrics", "label": "scored by"},
+
+    # Sell ranking
+    {"from": "dortmund", "to": "brighton", "label": "ranked above"},
+    {"from": "brighton", "to": "ajax", "label": "ranked above"},
+
+    # Enrichment script → API
+    {"from": "enrich_data_py", "to": "compute_buy_sell_pairs", "label": "triggers"},
+    {"from": "enrich_data_py", "to": "compute_club_metrics", "label": "triggers"},
+
+    # ETA → rate limit
+    {"from": "eta_display", "to": "RATE_LIMIT_1S", "label": "works with"},
+
+    # All scored clubs
+    {"from": "233_clubs_scored", "to": "brentford", "label": "includes"},
+    {"from": "233_clubs_scored", "to": "famalicao", "label": "includes"},
+    {"from": "233_clubs_scored", "to": "lecce", "label": "includes"},
 ]
 
 
@@ -284,7 +348,7 @@ html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Transfer Club Rankings — Knowledge Graph</title>
+<title>Transfer Club Rankings  Knowledge Graph</title>
 <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -301,7 +365,7 @@ html_content = f"""<!DOCTYPE html>
 </head>
 <body>
 <div id="header">
-  <h1>🧠 Transfer Club Rankings — Knowledge Graph</h1>
+  <h1>🧠 Transfer Club Rankings  Knowledge Graph</h1>
   <p>Built from conversation: datasets · pipeline · bugs · fixes · clubs · players · features · data gaps</p>
 </div>
 <div id="legend"><div id="legend-inner">{legend_items}</div></div>

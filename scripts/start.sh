@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-# Start Transfer Club Rankings — both API backend and frontend.
+# Start Transfer Club Rankings - both API backend and frontend.
 # ──────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -38,7 +38,7 @@ echo "  Frontend running on http://localhost:3000 (PID $FE_PID)"
 cd "$PROJECT_ROOT"
 
 echo ""
-echo "  ✅  http://localhost:3000  — Frontend"
-echo "  ✅  http://localhost:8000  — API"
+echo "  ✅  http://localhost:3000  - Frontend"
+echo "  ✅  http://localhost:8000  - API"
 echo ""
 echo "Logs:  tail -f /tmp/api.log  |  tail -f /tmp/frontend.log"
