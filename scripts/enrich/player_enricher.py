@@ -10,12 +10,12 @@ For each player:
 import logging
 import re
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.config import MIN_YEAR
 from api.models import Player, Transfer, PlayerValuation
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,17 @@ def _parse_fee(fee_str: str | None) -> float | None:
     return _parse_market_value(fee_str)
 
 
+def _compute_age_at_transfer(
+    date_of_birth: date | None,
+    transfer_date: date | None,
+) -> float | None:
+    """Compute a player's age in years at the time of a transfer."""
+    if not date_of_birth or not transfer_date:
+        return None
+    delta = transfer_date - date_of_birth
+    return delta.days / 365.25
+
+
 def _extract_position(profile: dict) -> str | None:
     """Extract the main position string from the profile's position dict."""
     pos = profile.get("position", {})
@@ -141,6 +152,39 @@ def _extract_height(profile: dict) -> float | None:
             return float(match.group(1).replace(",", "."))
         except (ValueError, TypeError):
             pass
+    return None
+
+
+def _extract_citizenship(profile: dict) -> str | None:
+    """Extract citizenship(s) from the profile's citizenship list.
+
+    Returns comma-separated string of nationalities, e.g. 'Argentina,Italy'.
+    """
+    citizenship = profile.get("citizenship")
+    if citizenship and isinstance(citizenship, list):
+        cleaned = [c.strip() for c in citizenship if c and c.strip()]
+        if cleaned:
+            return ", ".join(cleaned)
+    return None
+
+
+def _extract_agent(profile: dict) -> str | None:
+    """Extract agent name from the profile's agent dict."""
+    agent = profile.get("agent")
+    if agent and isinstance(agent, dict):
+        name = agent.get("name")
+        if name and name.strip():
+            return name.strip()
+    return None
+
+
+def _extract_contract_expiry(profile: dict) -> date | None:
+    """Extract contract expiry date from the profile's club dict."""
+    club = profile.get("club", {})
+    if club and isinstance(club, dict):
+        contract = club.get("contract_expires")
+        if contract:
+            return _parse_transfermarkt_date(str(contract))
     return None
 
 
@@ -199,6 +243,28 @@ async def enrich_player_profile(
         if parsed_mv is not None:
             player.market_value_in_eur = parsed_mv
 
+    # --- NEW: Scouting enrichment fields ---
+
+    # Citizenship (critical for understanding scouting markets)
+    citizenship = _extract_citizenship(profile)
+    if citizenship:
+        player.citizenship = citizenship
+
+    # Agent (important for Benfica/Wolves/agent-pipeline analysis)
+    agent = _extract_agent(profile)
+    if agent:
+        player.agent_name = agent
+
+    # Contract expiry (determines leverage in transfer negotiations)
+    contract_expiry = _extract_contract_expiry(profile)
+    if contract_expiry:
+        player.contract_expiry_date = contract_expiry
+
+    # Player image URL (from Transfermarkt CDN)
+    image_url = profile.get("imageUrl") or profile.get("image_url")
+    if image_url:
+        player.image_url = str(image_url).strip()
+
     return True
 
 
@@ -232,8 +298,8 @@ async def enrich_player_valuations(
         val_value = _parse_market_value(str(entry.get("marketValue", "")))
         if not val_date or val_value is None:
             continue
-        # Skip valuations before 2015 (focus on modern era)
-        if val_date.year < 2015:
+        # Use config-based minimum year instead of hardcoded 2015
+        if val_date.year < MIN_YEAR:
             continue
 
         key = (str(val_date), val_value)
@@ -294,13 +360,15 @@ async def enrich_player_transfers(
         dt = str(row.transfer_date) if row.transfer_date else ""
         existing.add((row.player_id, row.from_club_id, row.to_club_id, dt))
 
-    # Look up player name once (not inside the loop)
+    # Look up player name and DOB once (not inside the loop)
     player_result = await session.execute(
-        text("SELECT name FROM players WHERE player_id = :pid"),
+        text("SELECT name, date_of_birth FROM players WHERE player_id = :pid"),
         {"pid": player_id},
     )
     player_row = player_result.fetchone()
     player_name = player_row[0] if player_row else None
+    raw_dob = player_row[1] if player_row else None
+    player_dob = _parse_transfermarkt_date(str(raw_dob)) if raw_dob else None
 
     count = 0
     for t in transfers:
@@ -327,8 +395,8 @@ async def enrich_player_transfers(
         transfer_fee = _parse_fee(t.get("fee"))
         market_value = _parse_market_value(t.get("marketValue"))
 
-        # Skip transfers before 2015 (focus on modern era)
-        if transfer_date and transfer_date.year < 2015:
+        # Use config-based minimum year instead of hardcoded 2015
+        if transfer_date and transfer_date.year < MIN_YEAR:
             continue
 
         # Build dedup key
@@ -337,8 +405,9 @@ async def enrich_player_transfers(
         if key in existing:
             continue
 
-        # Generate a unique negative transfer_id for new records
-        # (will be replaced by auto-increment on insert)
+        # Compute age at transfer from DOB
+        age_at_transfer = _compute_age_at_transfer(player_dob, transfer_date)
+
         transfer = Transfer(
             player_id=player_id,
             player_name=player_name,
@@ -350,6 +419,7 @@ async def enrich_player_transfers(
             transfer_season=t.get("season"),
             transfer_fee=transfer_fee,
             market_value_in_eur=market_value,
+            age_at_transfer=age_at_transfer,
         )
         session.add(transfer)
         existing.add(key)

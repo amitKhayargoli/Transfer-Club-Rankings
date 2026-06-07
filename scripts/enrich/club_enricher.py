@@ -5,18 +5,30 @@ For each club:
 1. Search by name in transfermarkt-api to find matching ID
 2. Fetch club profile -> update clubs table
 3. Fetch club players -> call player enrichment for each
+4. Graph repair: find orphan clubs referenced in transfers but missing from clubs table
 """
 
 import logging
+import re
+import time
 from difflib import SequenceMatcher
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.models import Club, Player, Transfer
 
 logger = logging.getLogger(__name__)
+
+
+# ── Club names that are metadata entries, not real clubs ────────────────────
+
+NON_CLUB_NAMES = {
+    "without club", "retired", "unknown", "career break",
+    "without club a", "without club b", "career break a",
+    "no club", "free agent", "unattached", "retired a",
+}
 
 
 def _name_similarity(name_a: str, name_b: str) -> float:
@@ -92,6 +104,222 @@ async def enrich_club_profile(
         await session.flush()
 
     return updated
+
+
+# ── Graph Repair: Detect & fix missing source clubs ────────────────────────
+
+# Patterns that indicate a club name is a reserve/youth team (low priority)
+_RESERVE_PATTERNS = [
+    r"\bu1[4-9]\b", r"\bu2[0-3]\b", r"\bU20\b", r"\bU19\b", r"\bU18\b", r"\bU17\b",
+    r"\bII$", r"\bB$", r"\bB[\s_]", r"\bReservas\b", r"\bJong\b", r"\bJunior\b",
+    r"\bJuvenil", r"\bSub-?1[4-9]\b", r"\bSub-?2[0-3]\b", r"\bYouth\b",
+    r"\bUtd?\s*B$", r"\bFC\s*B$", r"Next Gen", r"\bU21\b", r"\bU23\b",
+]
+
+
+async def find_orphan_club_ids(
+    session: AsyncSession,
+    exclude_non_clubs: bool = True,
+    exclude_reserves: bool = True,
+    min_transfers: int = 1,
+) -> list[tuple[int, str, int]]:
+    """
+    Find club IDs referenced in transfers/players but missing from the clubs table.
+
+    Returns list of (club_id, club_name, transfer_count) ordered by transfer_count descending.
+
+    Args:
+        exclude_non_clubs: Filter out known metadata entries ("Without Club", "Retired", etc.)
+        exclude_reserves: Filter out reserve/youth teams (U21, B teams, etc.)
+        min_transfers: Minimum number of transfers referencing the club to include
+    """
+    raw = await session.execute(text("""
+        SELECT cid, name, SUM(cnt) as total_cnt FROM (
+            SELECT from_club_id AS cid, from_club_name AS name, COUNT(*) AS cnt
+            FROM transfers WHERE from_club_id IS NOT NULL AND from_club_name IS NOT NULL
+              AND from_club_name != ''
+            GROUP BY from_club_id
+            UNION ALL
+            SELECT to_club_id, to_club_name, COUNT(*)
+            FROM transfers WHERE to_club_id IS NOT NULL AND to_club_name IS NOT NULL
+              AND to_club_name != ''
+            GROUP BY to_club_id
+        ) AS edge_counts
+        WHERE cid NOT IN (SELECT club_id FROM clubs)
+        GROUP BY cid, name
+        ORDER BY SUM(cnt) DESC
+    """))
+
+    result = []
+    for row in raw:
+        cid, name, count = row[0], str(row[1] or ""), int(row[2])
+
+        if count < min_transfers:
+            continue
+
+        if exclude_non_clubs and name.lower().strip() in NON_CLUB_NAMES:
+            continue
+
+        if exclude_reserves:
+            is_reserve = False
+            for pattern in _RESERVE_PATTERNS:
+                if re.search(pattern, name, re.IGNORECASE):
+                    is_reserve = True
+                    break
+            if is_reserve:
+                continue
+
+        result.append((cid, name, count))
+
+    return result
+
+
+async def repair_missing_clubs(
+    session: AsyncSession,
+    client: Any,
+    dry_run: bool = False,
+    batch_size: int | None = None,
+    min_transfers: int = 1,
+    include_reserves: bool = False,
+) -> dict:
+    """
+    Find orphan clubs (referenced in transfers but missing from clubs table)
+    and fetch their profiles from Transfermarkt to upsert them.
+
+    This is the "graph repair" step — it ensures the club graph is complete so
+    that every referenced club_id exists in the clubs table.
+
+    Args:
+        client: TransfermarktClient instance with rate limiting
+        dry_run: If True, only report what would be done
+        batch_size: Max clubs to process (None = all)
+        min_transfers: Minimum transfer count for a club to be included
+        include_reserves: If True, also process reserve/youth teams
+
+    Returns:
+        dict with keys: found, processed, succeeded, failed, skipped
+    """
+    orphan_clubs = await find_orphan_club_ids(
+        session,
+        exclude_non_clubs=True,
+        exclude_reserves=not include_reserves,
+        min_transfers=min_transfers,
+    )
+
+    if not orphan_clubs:
+        logger.info("No orphan clubs found — the graph is complete!")
+        return {"found": 0, "processed": 0, "succeeded": 0, "failed": 0, "skipped": 0}
+
+    # Filter existing clubs so we only process truly new ones
+    existing_ids = set()
+    raw_existing = await session.execute(text("SELECT club_id FROM clubs"))
+    for row in raw_existing:
+        existing_ids.add(int(row[0]))
+
+    to_process = [(cid, name, cnt) for cid, name, cnt in orphan_clubs if cid not in existing_ids]
+
+    if batch_size:
+        to_process = to_process[:batch_size]
+
+    if dry_run:
+        logger.info(
+            "[DRY RUN] Found %d orphan clubs (%d will be processed, %d already exist)",
+            len(orphan_clubs), len(to_process), len(orphan_clubs) - len(to_process),
+        )
+        for cid, name, cnt in to_process[:20]:
+            logger.info("  [DRY RUN] Would fetch club %d: '%s' (%d transfers)", cid, name, cnt)
+        if len(to_process) > 20:
+            logger.info("  ... and %d more", len(to_process) - 20)
+        return {
+            "found": len(orphan_clubs),
+            "processed": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "skipped": len(orphan_clubs) - len(to_process),
+        }
+
+    stats = {"found": len(orphan_clubs), "processed": 0, "succeeded": 0, "failed": 0, "skipped": 0}
+    start_time = time.time()
+
+    for idx, (club_id, club_name, transfer_count) in enumerate(to_process, 1):
+        # Check again (in case another batch added it)
+        existing = await session.get(Club, club_id)
+        if existing:
+            stats["skipped"] += 1
+            continue
+
+        try:
+            profile = client.get_club_profile(str(club_id))
+            if not profile:
+                logger.warning("  No profile for club %d (%s), inserting minimal record", club_id, club_name)
+                # Still insert the club with just the name so the graph is connected
+                club = Club(
+                    club_id=club_id,
+                    name=club_name[:100],
+                )
+                session.add(club)
+                await session.flush()
+                stats["succeeded"] += 1
+                continue
+
+            # Create or update the club record
+            club = Club(
+                club_id=club_id,
+                name=club_name[:100],
+            )
+            session.add(club)
+            await session.flush()
+
+            # Enrich with profile data
+            updated = await enrich_club_profile(session, club, profile)
+            stats["succeeded"] += 1
+
+            if updated:
+                logger.info(
+                    "  [%d/%d] ✓ Club %d: '%s' (%d transfers) — %s",
+                    idx, len(to_process), club_id, profile.get("name", club_name),
+                    transfer_count,
+                    profile.get("league", {}).get("id", "no league") if isinstance(profile.get("league"), dict) else "",
+                )
+            else:
+                logger.info(
+                    "  [%d/%d] ✓ Club %d: '%s' (%d transfers) — minimal insert",
+                    idx, len(to_process), club_id, club_name, transfer_count,
+                )
+
+        except Exception as e:
+            logger.error("  [%d/%d] ✗ Failed club %d (%s): %s", idx, len(to_process), club_id, club_name, e)
+            # Still insert a minimal record so the graph is at least connected
+            try:
+                club = Club(club_id=club_id, name=club_name[:100])
+                session.add(club)
+                await session.flush()
+                stats["succeeded"] += 1
+            except Exception:
+                stats["failed"] += 1
+
+        stats["processed"] += 1
+
+        if idx % 50 == 0:
+            await session.commit()
+            elapsed = time.time() - start_time
+            rate = idx / elapsed if elapsed > 0 else 0
+            logger.info(
+                "  Progress: %d/%d clubs | Rate: %.1f/min | Succeeded: %d | Failed: %d",
+                idx, len(to_process), rate * 60, stats["succeeded"], stats["failed"],
+            )
+
+    await session.commit()
+    elapsed = time.time() - start_time
+    logger.info(
+        "\nGraph repair complete: %d clubs processed in %.1fs (%.1f/min). "
+        "Succeeded: %d, Failed: %d, Skipped: %d",
+        stats["processed"], elapsed,
+        stats["processed"] / elapsed * 60 if elapsed > 0 else 0,
+        stats["succeeded"], stats["failed"], stats["skipped"],
+    )
+
+    return stats
 
 
 async def get_players_by_league(

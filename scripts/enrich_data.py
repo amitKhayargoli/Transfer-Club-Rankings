@@ -95,6 +95,74 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip players who already have any transfers in the database",
     )
+    parser.add_argument(
+        "--graph-repair",
+        action="store_true",
+        help="Run graph repair to find orphan clubs (referenced in transfers but missing from clubs table) and fetch their profiles",
+    )
+    parser.add_argument(
+        "--repair-min-transfers",
+        type=int,
+        default=3,
+        help="Minimum transfer count for an orphan club to be repaired (default: 3)",
+    )
+    parser.add_argument(
+        "--repair-batch-size",
+        type=int,
+        default=None,
+        help="Max orphan clubs to repair in this run (default: all)",
+    )
+    parser.add_argument(
+        "--include-reserves",
+        action="store_true",
+        help="Include reserve/youth teams in graph repair (excluded by default)",
+    )
+    parser.add_argument(
+        "--reconstruct-careers",
+        action="store_true",
+        help="Run player career reconstruction: detect broken transfer chains and repair them",
+    )
+    parser.add_argument(
+        "--recon-batch-size",
+        type=int,
+        default=50,
+        help="Players to reconstruct per iteration (default: 50)",
+    )
+    parser.add_argument(
+        "--recon-max-iterations",
+        type=int,
+        default=5,
+        help="Max reconstruction loop iterations (default: 5)",
+    )
+    parser.add_argument(
+        "--recon-min-fee",
+        type=float,
+        default=100_000,
+        help="Minimum fee for unpaired sells to be candidates (default: €100K)",
+    )
+    parser.add_argument(
+        "--recon-strategy",
+        choices=["by_fee", "silent"],
+        default="by_fee",
+        help="Detection strategy: by_fee (structural unpaired sells), silent (missing/orphan origin clubs) (default: by_fee)",
+    )
+    parser.add_argument(
+        "--enrich-profiles",
+        action="store_true",
+        help="Run profile-only enrichment: fills in missing image_url, citizenship, agent_name for players with complete transfers",
+    )
+    parser.add_argument(
+        "--profile-fields",
+        nargs="*",
+        default=["image_url"],
+        help="Profile fields to check for missing data (default: image_url)",
+    )
+    parser.add_argument(
+        "--profile-batch-size",
+        type=int,
+        default=100,
+        help="Players to enrich per profile run (default: 100)",
+    )
     return parser.parse_args()
 
 
@@ -136,7 +204,14 @@ async def main():
         enrich_player_transfers,
         enrich_player_valuations,
     )
-    from scripts.enrich.club_enricher import get_players_by_league, get_players_by_clubs
+    from scripts.enrich.club_enricher import get_players_by_league, get_players_by_clubs, repair_missing_clubs
+    from scripts.enrich.reconstruction_runner import (
+        run_reconstruction_pipeline, detect_broken_chains, detect_silent_origin_gaps,
+        count_unpaired_sells,
+    )
+    from scripts.enrich.career_reconstructor import (
+        detect_incomplete_profiles, enrich_profiles_batch,
+    )
     from scripts.enrich.analytics_runner import run_analytics
     from scripts.enrich.consistency import run_consistency_checks
 
@@ -163,6 +238,158 @@ async def main():
     # ── Main enrichment loop ────────────────────────────────────────────
 
     async with async_session_factory() as session:
+        # If --reconstruct-careers mode, run the career reconstruction engine
+        if args.reconstruct_careers:
+            logger.info("\n" + "=" * 60)
+            logger.info("CAREER RECONSTRUCTION MODE")
+            logger.info("=" * 60)
+
+            # Dry-run: just report candidates without making changes
+            if args.dry_run:
+                logger.info("\nDetecting candidates for career reconstruction...")
+                if args.recon_strategy == "silent":
+                    candidates = await detect_silent_origin_gaps(
+                        session, min_fee=args.recon_min_fee, max_count=1000,
+                    )
+                else:
+                    candidates = await detect_broken_chains(
+                        session, min_fee=args.recon_min_fee, max_count=1000,
+                    )
+                logger.info(
+                    "Found %d players needing reconstruction (min fee: €%.0fK, strategy: %s)",
+                    len(candidates), args.recon_min_fee / 1000, args.recon_strategy,
+                )
+                print(f"\n{'Player ID':>10} {'Name':<35} {'Unpaired Value':>20} {'Sells':>8}")
+                print(f"{'-'*10} {'-'*35} {'-'*20} {'-'*8}")
+                for pid, name, fee, count in candidates[:30]:
+                    fee_str = f"€{fee/1_000_000:.1f}M" if fee >= 1_000_000 else f"€{fee:,.0f}"
+                    print(f"{pid:>10} {str(name)[:35]:<35} {fee_str:>20} {count:>8}")
+                if len(candidates) > 30:
+                    print(f"  ... and {len(candidates) - 30} more")
+                print(f"\nTotal: {len(candidates)} players with €{sum(f for _,_,f,_ in candidates)/1_000_000:.0f}M in unpaired sells")
+                elapsed = time.time() - start_time
+                print(f"\nElapsed time: {elapsed:.1f}s")
+                return
+
+            # Full reconstruction using Graph Truth Engine pipeline
+            recon_stats = await run_reconstruction_pipeline(
+                session=session,
+                client=client,
+                dry_run=False,
+                batch_size=args.recon_batch_size,
+                max_iterations=args.recon_max_iterations,
+                min_fee=args.recon_min_fee,
+                strategy=args.recon_strategy,
+            )
+
+            stats["players_processed"] = recon_stats["total_processed"]
+            stats["transfers_inserted"] = recon_stats["total_inserted"]
+
+            elapsed = time.time() - start_time
+            cd = recon_stats.get("confidence_distribution", {})
+            gv = recon_stats.get("graph_validation")
+
+            print("\n" + "=" * 65)
+            print("GRAPH TRUTH ENGINE — RECONSTRUCTION REPORT")
+            print("=" * 65)
+            print(f"  Iterations:          {recon_stats['iterations']}")
+            print(f"  Players processed:   {recon_stats['total_processed']}")
+            print(f"  Transfers inserted:  {recon_stats['total_inserted']}")
+            print(f"  Players failed:      {recon_stats['total_failed']}")
+            print(f"  Unpaired sells:      {recon_stats['unpaired_before']} → {recon_stats['unpaired_after']}")
+            if recon_stats["unpaired_before"] > 0:
+                reduction = (1 - recon_stats["unpaired_after"] / recon_stats["unpaired_before"]) * 100
+                print(f"  Reduction:           {reduction:.1f}%")
+            print(f"  Confidence:          H={cd.get('high',0)} M={cd.get('medium',0)} L={cd.get('low',0)}")
+            if gv:
+                print(f"  Graph health:        {gv.graph_health_score:.3f}")
+            print(f"  Converged:           {recon_stats['converged']} ({recon_stats.get('convergence_reason','')})")
+            print(f"  Elapsed time:        {elapsed:.1f}s")
+            print("=" * 65)
+            return
+
+        # If --enrich-profiles mode, run lightweight profile-only enrichment
+        if args.enrich_profiles:
+            logger.info("\n" + "=" * 60)
+            logger.info("PROFILE ENRICHMENT MODE")
+            logger.info("=" * 60)
+            logger.info(
+                "Checking for missing profile fields: %s (batch size: %d)",
+                ", ".join(args.profile_fields), args.profile_batch_size,
+            )
+
+            candidates = await detect_incomplete_profiles(
+                session,
+                fields=args.profile_fields,
+                max_count=args.profile_batch_size,
+            )
+
+            logger.info("Found %d players with missing profile data", len(candidates))
+
+            if args.dry_run:
+                print(f"\n{'Player ID':>10} {'Name':<35} {'Missing Field':>20}")
+                print(f"{'-'*10} {'-'*35} {'-'*20}")
+                for pid, name, field in candidates[:30]:
+                    print(f"{pid:>10} {str(name)[:35]:<35} {field:>20}")
+                if len(candidates) > 30:
+                    print(f"  ... and {len(candidates) - 30} more")
+                print(f"\nTotal: {len(candidates)} players need profile enrichment")
+                elapsed = time.time() - start_time
+                print(f"\nElapsed time: {elapsed:.1f}s")
+                return
+
+            profile_stats = await enrich_profiles_batch(
+                session, client, candidates, dry_run=False,
+            )
+
+            stats["players_processed"] = profile_stats["processed"]
+            stats["profiles_updated"] = profile_stats["updated"]
+
+            elapsed = time.time() - start_time
+            print("\n" + "=" * 60)
+            print("PROFILE ENRICHMENT SUMMARY")
+            print("=" * 60)
+            print(f"  Candidates found:   {profile_stats['total_candidates']}")
+            print(f"  Profiles enriched:  {profile_stats['updated']}")
+            print(f"  Failed:             {profile_stats['failed']}")
+            print(f"  Elapsed time:       {elapsed:.1f}s")
+            print("=" * 60)
+            return
+
+        # If --graph-repair mode, skip player enrichment and just fix the graph
+        if args.graph_repair:
+            logger.info("\n" + "=" * 60)
+            logger.info("GRAPH REPAIR MODE")
+            logger.info("=" * 60)
+            logger.info(
+                "Finding orphan clubs (min %d transfers, include_reserves=%s)...",
+                args.repair_min_transfers, args.include_reserves,
+            )
+            repair_stats = await repair_missing_clubs(
+                session=session,
+                client=client,
+                dry_run=args.dry_run,
+                batch_size=args.repair_batch_size,
+                min_transfers=args.repair_min_transfers,
+                include_reserves=args.include_reserves,
+            )
+            stats["clubs_enriched"] = repair_stats["succeeded"]
+
+            # Skip to summary — no player enrichment, analytics, or consistency checks
+            # that would only be relevant for player data changes
+            elapsed = time.time() - start_time
+            print("\n" + "=" * 60)
+            print("GRAPH REPAIR SUMMARY")
+            print("=" * 60)
+            if args.dry_run:
+                print("  DRY RUN - no changes were made")
+            print(f"  Orphan clubs found: {repair_stats['found']}")
+            print(f"  Clubs enriched:     {stats['clubs_enriched']}")
+            print(f"  Failed:             {repair_stats['failed']}")
+            print(f"  Elapsed time:       {elapsed:.1f}s")
+            print("=" * 60)
+            return
+
         # Step 1: Get all players (by club IDs or league)
         if club_ids:
             players = await get_players_by_clubs(session, club_ids)
