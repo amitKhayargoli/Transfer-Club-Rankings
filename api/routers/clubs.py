@@ -10,16 +10,18 @@ from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db
-from api.models import Club, Transfer
+from api.models import Club, ClubMetricsWindow, Transfer
 from api.schemas import (
     ClubBase,
     ClubDetailResponse,
     ClubListResponse,
     ClubCompareResponse,
+    ClubWindowMetrics,
+    ClubWindowMetricsResponse,
     TransferBase,
     TransferListResponse,
 )
-from api.config import MIN_TRANSFERS
+from api.config import MIN_TRANSFERS, ANALYTICS_WINDOWS
 from api.utils import enrich_transfer_types
 
 # ── Competition name mapping ──────────────────────────────────────────────
@@ -102,54 +104,86 @@ async def list_clubs(
     min_transfers: int = Query(MIN_TRANSFERS, description="Minimum transfers threshold"),
     sort_by: str = Query("composite_score", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order: asc or desc"),
-    year_from: Optional[int] = Query(None, description="Start year"),
-    year_to: Optional[int] = Query(None, description="End year"),
+    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}. Defaults to all-time if omitted."),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(Club)
+    # Determine whether to use windowed metrics or full Club metrics
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
-    if league:
-        query = query.where(Club.domestic_competition_id == league)
-    elif leagues:
-        league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
-        query = query.where(Club.domestic_competition_id.in_(league_ids))
+    if use_window:
+        # Query from ClubMetricsWindow with precomputed window metrics
+        query = select(ClubMetricsWindow).where(
+            ClubMetricsWindow.window_key == window
+        )
+        # Apply league filter via Club join
+        if league:
+            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
+                Club.domestic_competition_id == league
+            )
+        elif leagues:
+            league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
+            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
+                Club.domestic_competition_id.in_(league_ids)
+            )
 
-    # Apply year filters on transfers count (only clubs with transfers in range)
-    if year_from or year_to:
-        subq = select(Transfer.to_club_id)
-        if year_from:
-            subq = subq.where(func.extract("year", Transfer.transfer_date) >= year_from)
-        if year_to:
-            subq = subq.where(func.extract("year", Transfer.transfer_date) <= year_to)
-        query = query.where(Club.club_id.in_(subq))
+        query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
 
-    # Only clubs meeting the minimum transfer threshold
-    query = query.where(Club.total_transfers >= min_transfers)
+        # Sorting
+        sort_col = getattr(ClubMetricsWindow, sort_by, ClubMetricsWindow.composite_score)
+        if sort_order == "desc":
+            query = query.order_by(sort_col.desc().nullslast())
+        else:
+            query = query.order_by(sort_col.asc().nullslast())
 
-    # Sorting
-    sort_col = getattr(Club, sort_by, Club.composite_score)
-    if sort_order == "desc":
-        query = query.order_by(sort_col.desc().nullslast())
+        # Pagination
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        window_metrics = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
     else:
-        query = query.order_by(sort_col.asc().nullslast())
+        # Full Club model query (existing behavior, all-time metrics)
+        query = select(Club)
 
-    # Pagination
-    total_q = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(total_q)
-    total = total_result.scalar() or 0
+        if league:
+            query = query.where(Club.domestic_competition_id == league)
+        elif leagues:
+            league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
+            query = query.where(Club.domestic_competition_id.in_(league_ids))
 
-    query = query.offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    clubs = result.scalars().all()
+        query = query.where(Club.total_transfers >= min_transfers)
 
-    return ClubListResponse(
-        clubs=[ClubBase.model_validate(c) for c in clubs],
-        total=total,
-        page=page,
-        per_page=per_page,
-    )
+        sort_col = getattr(Club, sort_by, Club.composite_score)
+        if sort_order == "desc":
+            query = query.order_by(sort_col.desc().nullslast())
+        else:
+            query = query.order_by(sort_col.asc().nullslast())
+
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        clubs = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(c) for c in clubs],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
 
 
 @router.get("/compare", response_model=ClubCompareResponse)
@@ -178,63 +212,132 @@ async def compare_clubs(
 @router.get("/sell-leaders", response_model=ClubListResponse)
 async def list_sell_leaders(
     league: Optional[str] = Query(None, description="Filter by league"),
+    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}"),
     min_transfers: int = Query(3, description="Minimum transfers threshold"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """Clubs ranked by total profit from selling players."""
-    query = select(Club)
-    if league:
-        query = query.where(Club.domestic_competition_id == league)
-    query = query.where(Club.total_profit.isnot(None), Club.total_transfers >= min_transfers)
-    query = query.order_by(Club.total_profit.desc().nullslast())
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
-    total_q = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(total_q)
-    total = total_result.scalar() or 0
+    if use_window:
+        query = select(ClubMetricsWindow).where(
+            ClubMetricsWindow.window_key == window,
+            ClubMetricsWindow.total_profit.isnot(None),
+        )
+        if league:
+            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
+                Club.domestic_competition_id == league
+            )
+        query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
+        query = query.order_by(ClubMetricsWindow.total_profit.desc().nullslast())
 
-    query = query.offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    clubs = result.scalars().all()
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
 
-    return ClubListResponse(
-        clubs=[ClubBase.model_validate(c) for c in clubs],
-        total=total,
-        page=page,
-        per_page=per_page,
-    )
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        window_metrics = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
+    else:
+        query = select(Club)
+        if league:
+            query = query.where(Club.domestic_competition_id == league)
+        query = query.where(Club.total_profit.isnot(None), Club.total_transfers >= min_transfers)
+        query = query.order_by(Club.total_profit.desc().nullslast())
+
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        clubs = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(c) for c in clubs],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
 
 
 @router.get("/academy-leaders", response_model=ClubListResponse)
 async def list_academy_leaders(
     league: Optional[str] = Query(None, description="Filter by league"),
+    leagues: Optional[str] = Query(None, description="Filter by comma-separated league IDs, e.g. 'GB1,FR1,ES1'"),
+    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}"),
     min_transfers: int = Query(3, description="Minimum transfers threshold"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """Clubs ranked by value creation (developing talent and selling high)."""
-    query = select(Club)
-    if league:
-        query = query.where(Club.domestic_competition_id == league)
-    query = query.where(Club.value_creation.isnot(None), Club.total_transfers >= min_transfers)
-    query = query.order_by(Club.value_creation.desc().nullslast())
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
-    total_q = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(total_q)
-    total = total_result.scalar() or 0
+    if use_window:
+        query = select(ClubMetricsWindow).where(
+            ClubMetricsWindow.window_key == window,
+            ClubMetricsWindow.value_creation.isnot(None),
+        )
+        if league:
+            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
+                Club.domestic_competition_id == league
+            )
+        elif leagues:
+            league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
+            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
+                Club.domestic_competition_id.in_(league_ids)
+            )
+        query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
+        query = query.order_by(ClubMetricsWindow.value_creation.desc().nullslast())
 
-    query = query.offset((page - 1) * per_page).limit(per_page)
-    result = await db.execute(query)
-    clubs = result.scalars().all()
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
 
-    return ClubListResponse(
-        clubs=[ClubBase.model_validate(c) for c in clubs],
-        total=total,
-        page=page,
-        per_page=per_page,
-    )
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        window_metrics = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
+    else:
+        query = select(Club)
+        if league:
+            query = query.where(Club.domestic_competition_id == league)
+        elif leagues:
+            league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
+            query = query.where(Club.domestic_competition_id.in_(league_ids))
+        query = query.where(Club.value_creation.isnot(None), Club.total_transfers >= min_transfers)
+        query = query.order_by(Club.value_creation.desc().nullslast())
+
+        total_q = select(func.count()).select_from(query.subquery())
+        total_result = await db.execute(total_q)
+        total = total_result.scalar() or 0
+
+        query = query.offset((page - 1) * per_page).limit(per_page)
+        result = await db.execute(query)
+        clubs = result.scalars().all()
+
+        return ClubListResponse(
+            clubs=[ClubBase.model_validate(c) for c in clubs],
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
 
 
 @router.get("/{club_id}", response_model=ClubDetailResponse)

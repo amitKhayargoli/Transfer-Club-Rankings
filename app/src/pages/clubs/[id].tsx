@@ -7,7 +7,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { fetchClub, fetchClubTransfers, clubLogoUrl, leagueLogoUrl } from "@/lib/api";
+import { fetchClub, fetchClubTransfers, clubLogoUrl, leagueLogoUrl, playerImageUrl } from "@/lib/api";
 
 function calcProfit(t: { profit?: number | null; sell_fee?: number | null; buy_fee?: number | null }): number | null {
   if (t.profit != null) return t.profit;
@@ -287,8 +287,15 @@ export default function ClubDetailPage() {
                     <td>
                       <Link
                         href={`/players/${t.player_id}`}
-                        className="font-medium hover:text-primary transition-colors"
+                        className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                       >
+                        <img
+                          src={playerImageUrl(t.player_id, "small") ?? ""}
+                          alt=""
+                          className="w-6 h-6 rounded-full object-cover shrink-0 bg-base-300"
+                          onError={(e) => { e.currentTarget.style.display = "none"; }}
+                          loading="lazy"
+                        />
                         {t.player_name ?? "Unknown"}
                       </Link>
                     </td>

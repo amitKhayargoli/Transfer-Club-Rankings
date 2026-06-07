@@ -34,9 +34,9 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
 
 // ── Player Thumbnail with Fallback ───────────────────────────────────────
 
-function PlayerThumb({ playerId, name }: { playerId: number; name: string }) {
+function PlayerThumb({ playerId, name, imageUrl }: { playerId: number; name: string; imageUrl?: string | null }) {
   const [imgError, setImgError] = useState(false);
-  const imgUrl = playerImageUrl(playerId, "small");
+  const imgUrl = playerImageUrl(playerId, "small", imageUrl);
 
   if (!imgError && imgUrl) {
     return (
@@ -403,7 +403,7 @@ export default function PlayersPage() {
                       href={`/players/${player.player_id}`}
                       className="font-medium hover:text-primary transition-colors flex items-center gap-2.5"
                     >
-                      <PlayerThumb playerId={player.player_id} name={player.name} />
+                      <PlayerThumb playerId={player.player_id} name={player.name} imageUrl={player.image_url} />
                       {player.name}
                     </Link>
                   </td>

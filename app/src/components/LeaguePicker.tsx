@@ -100,6 +100,22 @@ function LeagueLogo({ value, color }: { value: string; color: string }) {
     );
   }
 
+  // Fallback: gradient with league abbreviation (or football icon for TR)
+  if (value === "TR1") {
+    return (
+      <div
+        className="w-full h-full rounded-xl flex items-center justify-center"
+        style={{ background: `linear-gradient(135deg, ${color}88, ${color}44)` }}
+      >
+        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 2v20M2 12h20" />
+          <path d="M5.5 5.5l13 13M18.5 5.5l-13 13" />
+        </svg>
+      </div>
+    );
+  }
+
   // Fallback: gradient placeholder with league abbreviation
   return (
     <div

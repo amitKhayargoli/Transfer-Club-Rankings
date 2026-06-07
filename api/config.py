@@ -26,11 +26,19 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # ── Data Filtering ──────────────────────────────────────────────────────────
 
-MIN_YEAR = 2015
+# Scrape boundary: store everything from this range
+# Set to 2000 to capture full career arcs (CR7's Man Utd→RM 2009, Sporting→ManUtd 2003, etc.)
+MIN_YEAR = 2000
 MAX_YEAR = 2026
 MIN_TRANSFERS = 3
 MIN_BUY_FEE = 100_000  # Minimum buy fee (€) to include a pair in ROI calculations
                        # Prevents near-free transfers (€1K buys) from inflating ROI
+
+# Analytical boundary: separate from scrape boundary
+# The dashboard will precompute rankings for these windows so users can
+# slice by different eras without re-scraping.
+ANALYTICS_WINDOWS = [2010, 2015, 2020]
+DEFAULT_ANALYTICS_WINDOW = 2015  # Default dashboard filter (modern scouting era)
 
 # ── Composite Score Weights ────────────────────────────────────────────────
 

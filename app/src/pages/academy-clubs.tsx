@@ -60,9 +60,20 @@ export default function AcademyClubsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const enrichedLeagues = "GB1,ES1,IT1,FR1,L1,PO1,NL1,A1";
+
+  // Analytical year window: null = all-time, "2010", "2015", "2018"
+  const [yearWindow, setYearWindow] = useState<string | null>(null);
+  const YEAR_WINDOWS = [
+    { value: null, label: "All time" },
+    { value: "2010", label: "2010+" },
+    { value: "2015", label: "2015+" },
+    { value: "2020", label: "2020+" },
+  ];
+
   const { data, isLoading } = useQuery({
-    queryKey: ["academy-leaders", sortBy],
-    queryFn: () => fetchAcademyLeaders({ per_page: 200 }),
+    queryKey: ["academy-leaders", sortBy, enrichedLeagues, yearWindow],
+    queryFn: () => fetchAcademyLeaders({ per_page: 200, leagues: enrichedLeagues, min_transfers: 8, window: yearWindow ?? undefined }),
     placeholderData: (prev) => prev,
   });
 
@@ -107,6 +118,20 @@ export default function AcademyClubsPage() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Year Window Selector */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-base-content/50 font-medium mr-1">Era:</span>
+        {YEAR_WINDOWS.map((w) => (
+          <button
+            key={w.label}
+            onClick={() => { setYearWindow(w.value); setPage(1); }}
+            className={`btn btn-xs ${yearWindow === w.value ? "btn-primary" : "btn-ghost btn-outline"}`}
+          >
+            {w.label}
+          </button>
+        ))}
       </div>
 
       {/* Search + Sort */}

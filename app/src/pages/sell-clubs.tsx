@@ -59,9 +59,18 @@ export default function SellClubsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Analytical year window: null = all-time, "2010", "2015", "2018"
+  const [yearWindow, setYearWindow] = useState<string | null>(null);
+  const YEAR_WINDOWS = [
+    { value: null, label: "All time" },
+    { value: "2010", label: "2010+" },
+    { value: "2015", label: "2015+" },
+    { value: "2020", label: "2020+" },
+  ];
+
   const { data, isLoading } = useQuery({
-    queryKey: ["sell-leaders", sortBy],
-    queryFn: () => fetchSellLeaders({ per_page: 200 }),
+    queryKey: ["sell-leaders", sortBy, yearWindow],
+    queryFn: () => fetchSellLeaders({ per_page: 200, window: yearWindow ?? undefined }),
     placeholderData: (prev) => prev,
   });
 
@@ -106,6 +115,20 @@ export default function SellClubsPage() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Year Window Selector */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-base-content/50 font-medium mr-1">Era:</span>
+        {YEAR_WINDOWS.map((w) => (
+          <button
+            key={w.label}
+            onClick={() => { setYearWindow(w.value); setPage(1); }}
+            className={`btn btn-xs ${yearWindow === w.value ? "btn-primary" : "btn-ghost btn-outline"}`}
+          >
+            {w.label}
+          </button>
+        ))}
       </div>
 
       {/* Search + Sort */}

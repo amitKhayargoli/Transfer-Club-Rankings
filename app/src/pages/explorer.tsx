@@ -13,6 +13,7 @@ import {
   fetchTransfers,
   unifiedSearch,
   clubLogoUrl,
+  playerImageUrl,
   SearchResult,
 } from "@/lib/api";
 import PositionPicker from "@/components/PositionPicker";
@@ -513,8 +514,15 @@ export default function ExplorerPage() {
                   <td>
                     <Link
                       href={`/players/${t.player_id}`}
-                      className="font-medium hover:text-primary transition-colors"
+                      className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                     >
+                      <img
+                        src={playerImageUrl(t.player_id, "small") ?? ""}
+                        alt=""
+                        className="w-6 h-6 rounded-full object-cover shrink-0 bg-base-300"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                        loading="lazy"
+                      />
                       {t.player_name ?? "Unknown"}
                     </Link>
                   </td>

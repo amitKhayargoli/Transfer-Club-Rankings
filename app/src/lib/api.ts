@@ -36,8 +36,11 @@ export function clubLogoUrl(clubId: number | null | undefined, size: 'head' | 'm
   return `https://tmssl.akamaized.net/images/wappen/${size}/${clubId}.png`;
 }
 
-// Build player image URL from player_id using Transfermarkt CDN
-export function playerImageUrl(playerId: number | null | undefined, size: 'small' | 'medium' | 'big' | 'original' = 'medium'): string | null {
+// Build player image URL from player_id using Transfermarkt CDN.
+// If a stored imageUrl is provided (from the Transfermarkt API), use that first.
+// The CDN pattern is the fallback for players whose images haven't been scraped yet.
+export function playerImageUrl(playerId: number | null | undefined, size: 'small' | 'medium' | 'big' | 'original' = 'medium', imageUrl?: string | null): string | null {
+  if (imageUrl) return imageUrl;
   if (!playerId) return null;
   return `https://tmssl.akamaized.net/images/fotos/${size}/${playerId}.jpg`;
 }
@@ -63,12 +66,16 @@ export interface Player {
   current_club_id: number | null;
   current_club_name: string | null;
   market_value_in_eur: number | null;
+  image_url: string | null;
 }
 
 export interface PlayerDetail extends Player {
   foot: string | null;
   height_in_cm: number | null;
   highest_market_value_in_eur: number | null;
+  citizenship: string | null;
+  agent_name: string | null;
+  contract_expiry_date: string | null;
 }
 
 export interface PlayerListResponse {
@@ -155,6 +162,7 @@ export function fetchClubs(params?: {
   min_transfers?: number;
   sort_by?: string;
   sort_order?: string;
+  window?: string;
   page?: number;
   per_page?: number;
 }) {
@@ -164,6 +172,7 @@ export function fetchClubs(params?: {
   if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
   if (params?.sort_by) search.set("sort_by", params.sort_by);
   if (params?.sort_order) search.set("sort_order", params.sort_order);
+  if (params?.window) search.set("window", params.window);
   if (params?.page) search.set("page", String(params.page));
   if (params?.per_page) search.set("per_page", String(params.per_page));
   const qs = search.toString();
@@ -172,12 +181,14 @@ export function fetchClubs(params?: {
 
 export function fetchSellLeaders(params?: {
   league?: string;
+  window?: string;
   min_transfers?: number;
   page?: number;
   per_page?: number;
 }) {
   const search = new URLSearchParams();
   if (params?.league) search.set("league", params.league);
+  if (params?.window) search.set("window", params.window);
   if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
   if (params?.page) search.set("page", String(params.page));
   if (params?.per_page) search.set("per_page", String(params.per_page));
@@ -186,12 +197,16 @@ export function fetchSellLeaders(params?: {
 
 export function fetchAcademyLeaders(params?: {
   league?: string;
+  leagues?: string;
+  window?: string;
   min_transfers?: number;
   page?: number;
   per_page?: number;
 }) {
   const search = new URLSearchParams();
   if (params?.league) search.set("league", params.league);
+  if (params?.leagues) search.set("leagues", params.leagues);
+  if (params?.window) search.set("window", params.window);
   if (params?.min_transfers) search.set("min_transfers", String(params.min_transfers));
   if (params?.page) search.set("page", String(params.page));
   if (params?.per_page) search.set("per_page", String(params.per_page));

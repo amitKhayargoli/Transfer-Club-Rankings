@@ -3,6 +3,7 @@
  * Shows player info, transfer history, and market value over time.
  */
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/router";
 import Link from "next/link";
@@ -11,6 +12,7 @@ import {
   fetchPlayerTransfers,
   fetchPlayerValuations,
   clubLogoUrl,
+  playerImageUrl,
 } from "@/lib/api";
 import {
   LineChart,
@@ -77,6 +79,9 @@ export default function PlayerDetailPage() {
   const { id } = router.query;
   const playerId = Number(id);
 
+  // Must be before any early return (React hooks rule)
+  const [playerImgError, setPlayerImgError] = useState(false);
+
   const { data: player, isLoading } = useQuery({
     queryKey: ["player", playerId],
     queryFn: () => fetchPlayer(playerId),
@@ -114,12 +119,25 @@ export default function PlayerDetailPage() {
     );
   }
 
+  const playerImgUrl = playerImageUrl(playerId, "medium", player?.image_url);
+
   return (
     <div className="space-y-8">
       {/* Player Header */}
-      <div className="flex items-start gap-4">
-        <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center text-primary-content text-2xl font-bold shrink-0">
-          {player.name.charAt(0)}
+      <div className="flex items-start gap-5">
+        <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl shrink-0 overflow-hidden bg-base-200 flex items-center justify-center">
+          {!playerImgError && playerImgUrl ? (
+            <img
+              src={playerImgUrl}
+              alt={player.name}
+              className="w-full h-full object-cover"
+              onError={() => setPlayerImgError(true)}
+            />
+          ) : (
+            <span className="text-3xl font-bold text-primary">
+              {player.name.charAt(0)}
+            </span>
+          )}
         </div>
         <div>
           <h1 className="text-3xl font-bold">{player.name}</h1>
@@ -170,13 +188,13 @@ export default function PlayerDetailPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--bc) / 0.1)" />
                 <XAxis
                   dataKey="date"
-                  tick={{ fontSize: 12 }}
-                  stroke="hsl(var(--bc) / 0.3)"
+                  tick={{ fontSize: 12, fill: '#ffffff' }}
+                  stroke="#ffffff"
                 />
                 <YAxis
                   tickFormatter={(v) => `€${(v / 1_000_000).toFixed(0)}M`}
-                  tick={{ fontSize: 12 }}
-                  stroke="hsl(var(--bc) / 0.3)"
+                  tick={{ fontSize: 12, fill: '#ffffff' }}
+                  stroke="#ffffff"
                 />
                 <Tooltip
                   formatter={(value) => [formatEuro(Number(value)), "Market Value"]}

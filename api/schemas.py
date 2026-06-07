@@ -55,6 +55,7 @@ class PlayerBase(BaseModel):
     current_club_id: Optional[int] = None
     current_club_name: Optional[str] = None
     market_value_in_eur: Optional[float] = None
+    image_url: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +64,9 @@ class PlayerDetailResponse(PlayerBase):
     foot: Optional[str] = None
     height_in_cm: Optional[float] = None
     highest_market_value_in_eur: Optional[float] = None
+    citizenship: Optional[str] = None
+    agent_name: Optional[str] = None
+    contract_expiry_date: Optional[datetime.date] = None
 
 
 class PlayerListResponse(BaseModel):
@@ -92,6 +96,7 @@ class TransferBase(BaseModel):
     tenure_years: Optional[float] = None
     player_position: Optional[str] = None
     transfer_type: Optional[str] = None
+    age_at_transfer: Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -141,6 +146,29 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseModel):
     results: list[SearchResult]
+
+
+# ── Window Metrics Schema ──────────────────────────────────────────────────
+
+class ClubWindowMetrics(BaseModel):
+    club_id: int
+    window_key: str
+    total_transfers: Optional[int] = None
+    median_roi: Optional[float] = None
+    total_profit: Optional[float] = None
+    hit_rate: Optional[float] = None
+    value_creation: Optional[float] = None
+    composite_score: Optional[float] = None
+    last_updated: Optional[datetime.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class ClubWindowMetricsResponse(BaseModel):
+    clubs: list[ClubWindowMetrics]
+    total: int
+    page: int
+    per_page: int
 
 
 # ── Pipeline Schemas ────────────────────────────────────────────────────────

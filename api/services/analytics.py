@@ -1,10 +1,10 @@
 """
-Analytics pipeline  computes buy-sell pairs, ROI metrics, and club composite scores.
+Analytics pipeline — computes buy-sell pairs, ROI metrics, and club composite scores.
 
 This is the core business logic that:
 1. Matches buy and sell transfers for each player per club
 2. Calculates ROI, annualized ROI, profit, tenure
-3. Aggregates metrics by club
+3. Aggregates metrics by club (for the full dataset and per year window)
 4. Computes composite scores
 """
 
@@ -16,8 +16,12 @@ import pandas as pd
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.config import MIN_YEAR, MAX_YEAR, MIN_TRANSFERS, MIN_BUY_FEE, WEIGHT_MEDIAN_ROI, WEIGHT_TOTAL_PROFIT, WEIGHT_HIT_RATE, WEIGHT_VALUE_CREATION
-from api.models import Club, Player, Transfer, PlayerValuation
+from api.config import (
+    MIN_YEAR, MAX_YEAR, MIN_TRANSFERS, MIN_BUY_FEE,
+    ANALYTICS_WINDOWS, DEFAULT_ANALYTICS_WINDOW,
+    WEIGHT_MEDIAN_ROI, WEIGHT_TOTAL_PROFIT, WEIGHT_HIT_RATE, WEIGHT_VALUE_CREATION,
+)
+from api.models import Club, ClubMetricsWindow, Player, Transfer, PlayerValuation
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +98,6 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     )
 
     # Exclude pairs where the buy fee is below the minimum threshold
-    # Prevents near-free transfers (€1K buys) from inflating ROI calculations
     pairs = pairs[pairs["buy_fee"] >= MIN_BUY_FEE]
 
     if pairs.empty:
@@ -112,12 +115,10 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     # Annualized ROI - guard against overflow on quick flips
     def _calc_annualized(row):
         if row["tenure_years"] > 0 and row["buy_fee"] > 0:
-            # Minimum tenure of 7 days to avoid numerical overflow from extreme exponents
             effective_years = max(row["tenure_years"], 7 / 365.25)
             ratio = row["sell_fee"] / row["buy_fee"]
             try:
                 result = (ratio ** (1.0 / effective_years)) - 1
-                # Cap at ±500% to prevent absurd annualized values from quick flips
                 return max(min(result, 5.0), -5.0)
             except (OverflowError, ValueError):
                 return None
@@ -149,13 +150,11 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     pairs["player_name"] = pairs["player_id"].map(lambda pid: player_info.get(pid, {}).get("name"))
     pairs["player_position"] = pairs["player_id"].map(lambda pid: player_info.get(pid, {}).get("position"))
 
-    # Write back computed fields to Transfer rows  on BOTH buy and sell sides
+    # Write back computed fields to Transfer rows on the buy transfer
     pair_count = 0
     for _, pair in pairs.iterrows():
         buy_id = pair.get("buy_transfer_id") or pair.get("sell_transfer_id")
-        sell_id = pair.get("sell_transfer_id")
 
-        # Common fields to set on both sides
         buy_fee_val = pair["buy_fee"]
         sell_fee_val = pair["sell_fee"]
         profit_val = pair["profit"]
@@ -182,12 +181,6 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
                 transfer.player_position = pos_val
                 pair_count += 1
 
-        # NOTE: Profit/ROI is intentionally only stored on the buy transfer.
-        # Sell transfers get their profit from the API endpoint which looks up
-        # the corresponding buy transfer for the club being viewed.
-        # This avoids data corruption when a transfer is both a sell for one
-        # club AND a buy for another (the analytics loop would overwrite data).
-
         if pair_count % 1000 == 0:
             await session.flush()
 
@@ -196,35 +189,16 @@ async def compute_buy_sell_pairs(session: AsyncSession) -> int:
     return pair_count
 
 
-async def compute_club_metrics(session: AsyncSession) -> int:
+def _aggregate_pairs_to_metrics(pairs_data: list[dict]) -> pd.DataFrame:
+    """Aggregate a list of pair dicts into per-club metrics.
+
+    Returns a DataFrame with club metrics suitable for writing to Club or ClubMetricsWindow.
     """
-    Aggregate transfer pairs by club and compute composite score.
-    Returns number of clubs updated.
-    """
-    # Load all transfers with computed pairs
-    query = select(Transfer).where(Transfer.roi_pct.isnot(None))
-    result = await session.execute(query)
-    pairs = result.scalars().all()
+    if not pairs_data:
+        return pd.DataFrame()
 
-    if not pairs:
-        logger.warning("No computed pairs found to aggregate")
-        return 0
+    df = pd.DataFrame(pairs_data)
 
-    # Build a DataFrame from all pairs
-    data = []
-    for p in pairs:
-        data.append({
-            "club_id": p.to_club_id,  # The buying club (the one that made the profit/loss)
-            "profit": p.profit,
-            "roi_pct": p.roi_pct,
-            "annualized_roi_pct": p.annualized_roi_pct,
-            "value_creation_pct": p.value_creation_pct,
-            "sell_fee": p.sell_fee,
-        })
-
-    df = pd.DataFrame(data)
-
-    # Aggregate by club
     agg = df.groupby("club_id").agg(
         total_transfers=("roi_pct", "count"),
         median_roi=("roi_pct", "median"),
@@ -233,12 +207,12 @@ async def compute_club_metrics(session: AsyncSession) -> int:
         value_creation=("value_creation_pct", "median"),
     ).reset_index()
 
-    # Apply minimum transfers threshold
-    agg = agg[agg["total_transfers"] >= MIN_TRANSFERS]
+    # Apply minimum transfers threshold (higher for smaller windows to avoid noise)
+    min_t = max(MIN_TRANSFERS, 2)  # at least 2 deals for any window
+    agg = agg[agg["total_transfers"] >= min_t]
 
     if agg.empty:
-        logger.warning("No clubs meet the minimum transfers threshold of %d", MIN_TRANSFERS)
-        return 0
+        return agg
 
     # Normalize metrics to 0-1 for composite score
     def _normalize(series):
@@ -252,7 +226,6 @@ async def compute_club_metrics(session: AsyncSession) -> int:
     agg["norm_hit_rate"] = _normalize(agg["hit_rate"])
     agg["norm_value_creation"] = _normalize(agg["value_creation"])
 
-    # Composite score
     agg["composite_score"] = (
         WEIGHT_MEDIAN_ROI * agg["norm_median_roi"]
         + WEIGHT_TOTAL_PROFIT * agg["norm_total_profit"]
@@ -260,7 +233,39 @@ async def compute_club_metrics(session: AsyncSession) -> int:
         + WEIGHT_VALUE_CREATION * agg["norm_value_creation"]
     )
 
-    # Write back to Club records
+    return agg
+
+
+async def compute_club_metrics(session: AsyncSession) -> int:
+    """
+    Aggregate all transfer pairs by club and compute composite score on the Club model.
+    This uses ALL data (no year filter).
+    """
+    query = select(Transfer).where(Transfer.roi_pct.isnot(None))
+    result = await session.execute(query)
+    pairs = result.scalars().all()
+
+    if not pairs:
+        logger.warning("No computed pairs found to aggregate")
+        return 0
+
+    data = []
+    for p in pairs:
+        data.append({
+            "club_id": p.to_club_id,
+            "profit": p.profit,
+            "roi_pct": p.roi_pct,
+            "annualized_roi_pct": p.annualized_roi_pct,
+            "value_creation_pct": p.value_creation_pct,
+            "sell_fee": p.sell_fee,
+        })
+
+    agg = _aggregate_pairs_to_metrics(data)
+
+    if agg.empty:
+        logger.warning("No clubs meet the minimum transfers threshold of %d", MIN_TRANSFERS)
+        return 0
+
     club_count = 0
     for _, row in agg.iterrows():
         club = await session.get(Club, int(row["club_id"]))
@@ -278,16 +283,113 @@ async def compute_club_metrics(session: AsyncSession) -> int:
             await session.flush()
 
     await session.commit()
-    logger.info("Updated metrics for %d clubs", club_count)
+    logger.info("Updated metrics for %d clubs (all data)", club_count)
     return club_count
 
 
+async def compute_club_metrics_for_window(session: AsyncSession, window_key: str) -> int:
+    """Aggregate transfer pairs filtered by buy_year >= window_key and store in ClubMetricsWindow.
+
+    Returns number of clubs updated (0 if window_key is already up-to-date).
+    """
+    min_buy_year = int(window_key)
+
+    # Load buy transfers with computed pairs, filtered by buy year
+    query = select(Transfer).where(
+        Transfer.roi_pct.isnot(None),
+        Transfer.buy_fee.isnot(None),
+        Transfer.transfer_date.isnot(None),
+        func.extract("year", Transfer.transfer_date) >= min_buy_year,
+    )
+    result = await session.execute(query)
+    pairs = result.scalars().all()
+
+    if not pairs:
+        logger.info("No pairs found for window %s, skipping", window_key)
+        return 0
+
+    data = []
+    for p in pairs:
+        data.append({
+            "club_id": p.to_club_id,
+            "profit": p.profit,
+            "roi_pct": p.roi_pct,
+            "annualized_roi_pct": p.annualized_roi_pct,
+            "value_creation_pct": p.value_creation_pct,
+            "sell_fee": p.sell_fee,
+        })
+
+    agg = _aggregate_pairs_to_metrics(data)
+
+    if agg.empty:
+        logger.info("No clubs meet minimum transfers threshold for window %s", window_key)
+        return 0
+
+    # Upsert into ClubMetricsWindow
+    club_count = 0
+    for _, row in agg.iterrows():
+        club_id = int(row["club_id"])
+
+        # Check for existing record
+        existing_q = select(ClubMetricsWindow).where(
+            ClubMetricsWindow.club_id == club_id,
+            ClubMetricsWindow.window_key == window_key,
+        )
+        existing_result = await session.execute(existing_q)
+        existing = existing_result.scalar_one_or_none()
+
+        if existing:
+            existing.total_transfers = int(row["total_transfers"])
+            existing.median_roi = row["median_roi"]
+            existing.total_profit = row["total_profit"]
+            existing.hit_rate = row["hit_rate"]
+            existing.value_creation = row["value_creation"]
+            existing.composite_score = row["composite_score"]
+            existing.last_updated = datetime.now()
+        else:
+            window_metrics = ClubMetricsWindow(
+                club_id=club_id,
+                window_key=window_key,
+                total_transfers=int(row["total_transfers"]),
+                median_roi=row["median_roi"],
+                total_profit=row["total_profit"],
+                hit_rate=row["hit_rate"],
+                value_creation=row["value_creation"],
+                composite_score=row["composite_score"],
+                last_updated=datetime.now(),
+            )
+            session.add(window_metrics)
+        club_count += 1
+
+        if club_count % 100 == 0:
+            await session.flush()
+
+    await session.commit()
+    logger.info("Updated metrics for %d clubs for window %s+", club_count, window_key)
+    return club_count
+
+
+async def compute_all_window_metrics(session: AsyncSession) -> dict:
+    """Compute club metrics for every configured analytical window.
+
+    Returns dict of window_key -> clubs_updated count.
+    """
+    results = {}
+    for window in ANALYTICS_WINDOWS:
+        key = str(window)
+        count = await compute_club_metrics_for_window(session, key)
+        results[key] = count
+    return results
+
+
 async def run_full_analytics(session: AsyncSession) -> dict:
-    """Run the full analytics pipeline: pairs → club metrics."""
+    """Run the full analytics pipeline: pairs → club metrics (all data + per window)."""
     pairs_count = await compute_buy_sell_pairs(session)
     clubs_count = await compute_club_metrics(session)
+    window_counts = await compute_all_window_metrics(session)
 
     return {
         "pairs_computed": pairs_count,
         "clubs_updated": clubs_count,
+        "windows_updated": window_counts,
     }
