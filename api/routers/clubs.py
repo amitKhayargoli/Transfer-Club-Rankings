@@ -24,6 +24,32 @@ from api.schemas import (
 from api.config import MIN_TRANSFERS, ANALYTICS_WINDOWS
 from api.utils import enrich_transfer_types
 
+
+# ── Helper: build ClubBase from window metrics + Club metadata ────────────
+
+def _build_club_base_from_window(wm: ClubMetricsWindow, club: Club) -> ClubBase:
+    """Build a ClubBase from ClubMetricsWindow + Club metadata.
+
+    ClubMetricsWindow does not store name/club_code/domestic_competition_id,
+    so we need the joined Club row to construct a valid ClubBase.
+    """
+    return ClubBase(
+        club_id=wm.club_id,
+        name=club.name,
+        club_code=club.club_code,
+        domestic_competition_id=club.domestic_competition_id,
+        total_transfers=wm.total_transfers,
+        median_roi=wm.median_roi,
+        annualized_roi=wm.annualized_roi,
+        total_profit=wm.total_profit,
+        hit_rate=wm.hit_rate,
+        value_creation=wm.value_creation,
+        profit_per_deal=wm.profit_per_deal,
+        buying_club_premium=wm.buying_club_premium,
+        composite_score=wm.composite_score,
+    )
+
+
 # ── Competition name mapping ──────────────────────────────────────────────
 
 COMPETITION_NAMES = {
@@ -113,20 +139,21 @@ async def list_clubs(
     use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
     if use_window:
-        # Query from ClubMetricsWindow with precomputed window metrics
-        query = select(ClubMetricsWindow).where(
+        # Query from ClubMetricsWindow with precomputed window metrics.
+        # Must join Club to get name/club_code/domestic_competition_id
+        # since ClubMetricsWindow does not store those columns.
+        query = select(ClubMetricsWindow, Club).join(
+            Club, ClubMetricsWindow.club_id == Club.club_id
+        ).where(
             ClubMetricsWindow.window_key == window
         )
-        # Apply league filter via Club join
+
+        # Apply league filter via Club (already joined)
         if league:
-            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
-                Club.domestic_competition_id == league
-            )
+            query = query.where(Club.domestic_competition_id == league)
         elif leagues:
             league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
-            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
-                Club.domestic_competition_id.in_(league_ids)
-            )
+            query = query.where(Club.domestic_competition_id.in_(league_ids))
 
         query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
 
@@ -144,10 +171,12 @@ async def list_clubs(
 
         query = query.offset((page - 1) * per_page).limit(per_page)
         result = await db.execute(query)
-        window_metrics = result.scalars().all()
+        rows = result.all()
+
+        clubs = [_build_club_base_from_window(wm, club) for wm, club in rows]
 
         return ClubListResponse(
-            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            clubs=clubs,
             total=total,
             page=page,
             per_page=per_page,
@@ -222,14 +251,14 @@ async def list_sell_leaders(
     use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
     if use_window:
-        query = select(ClubMetricsWindow).where(
+        query = select(ClubMetricsWindow, Club).join(
+            Club, ClubMetricsWindow.club_id == Club.club_id
+        ).where(
             ClubMetricsWindow.window_key == window,
             ClubMetricsWindow.total_profit.isnot(None),
         )
         if league:
-            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
-                Club.domestic_competition_id == league
-            )
+            query = query.where(Club.domestic_competition_id == league)
         query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
         query = query.order_by(ClubMetricsWindow.total_profit.desc().nullslast())
 
@@ -239,10 +268,12 @@ async def list_sell_leaders(
 
         query = query.offset((page - 1) * per_page).limit(per_page)
         result = await db.execute(query)
-        window_metrics = result.scalars().all()
+        rows = result.all()
+
+        clubs = [_build_club_base_from_window(wm, club) for wm, club in rows]
 
         return ClubListResponse(
-            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            clubs=clubs,
             total=total,
             page=page,
             per_page=per_page,
@@ -284,19 +315,17 @@ async def list_academy_leaders(
     use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
     if use_window:
-        query = select(ClubMetricsWindow).where(
+        query = select(ClubMetricsWindow, Club).join(
+            Club, ClubMetricsWindow.club_id == Club.club_id
+        ).where(
             ClubMetricsWindow.window_key == window,
             ClubMetricsWindow.value_creation.isnot(None),
         )
         if league:
-            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
-                Club.domestic_competition_id == league
-            )
+            query = query.where(Club.domestic_competition_id == league)
         elif leagues:
             league_ids = [l.strip() for l in leagues.split(",") if l.strip()]
-            query = query.join(Club, ClubMetricsWindow.club_id == Club.club_id).where(
-                Club.domestic_competition_id.in_(league_ids)
-            )
+            query = query.where(Club.domestic_competition_id.in_(league_ids))
         query = query.where(ClubMetricsWindow.total_transfers >= min_transfers)
         query = query.order_by(ClubMetricsWindow.value_creation.desc().nullslast())
 
@@ -306,10 +335,12 @@ async def list_academy_leaders(
 
         query = query.offset((page - 1) * per_page).limit(per_page)
         result = await db.execute(query)
-        window_metrics = result.scalars().all()
+        rows = result.all()
+
+        clubs = [_build_club_base_from_window(wm, club) for wm, club in rows]
 
         return ClubListResponse(
-            clubs=[ClubBase.model_validate(wm) for wm in window_metrics],
+            clubs=clubs,
             total=total,
             page=page,
             per_page=per_page,
