@@ -30,7 +30,7 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 # Set to 2000 to capture full career arcs (CR7's Man Utd→RM 2009, Sporting→ManUtd 2003, etc.)
 MIN_YEAR = 2000
 MAX_YEAR = 2026
-MIN_TRANSFERS = 3
+MIN_TRANSFERS = 8
 MIN_BUY_FEE = 100_000  # Minimum buy fee (€) to include a pair in ROI calculations
                        # Prevents near-free transfers (€1K buys) from inflating ROI
 
@@ -42,17 +42,10 @@ DEFAULT_ANALYTICS_WINDOW = 2015  # Default dashboard filter (modern scouting era
 
 # ── Composite Score Weights ────────────────────────────────────────────────
 
-WEIGHT_MEDIAN_ROI = 0.35
-WEIGHT_TOTAL_PROFIT = 0.25
-WEIGHT_HIT_RATE = 0.25
+# Weights for the 6-metric composite score (sum = 1.0)
+WEIGHT_MEDIAN_ROI = 0.25
+WEIGHT_TOTAL_PROFIT = 0.20
+WEIGHT_HIT_RATE = 0.20
 WEIGHT_VALUE_CREATION = 0.15
 WEIGHT_ANNUALIZED_ROI = 0.10
 WEIGHT_PROFIT_PER_DEAL = 0.10
-
-# New: updated composite weights (sum must equal 1.0)
-WEIGHT_MEDIAN_ROI_NEW = 0.25
-WEIGHT_TOTAL_PROFIT_NEW = 0.20
-WEIGHT_HIT_RATE_NEW = 0.20
-WEIGHT_VALUE_CREATION_NEW = 0.15
-WEIGHT_ANNUALIZED_ROI_NEW = 0.10
-WEIGHT_PROFIT_PER_DEAL_NEW = 0.10

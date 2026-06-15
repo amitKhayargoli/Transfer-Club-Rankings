@@ -20,6 +20,7 @@ from api.config import (
     MIN_YEAR, MAX_YEAR, MIN_TRANSFERS, MIN_BUY_FEE,
     ANALYTICS_WINDOWS, DEFAULT_ANALYTICS_WINDOW,
     WEIGHT_MEDIAN_ROI, WEIGHT_TOTAL_PROFIT, WEIGHT_HIT_RATE, WEIGHT_VALUE_CREATION,
+    WEIGHT_ANNUALIZED_ROI, WEIGHT_PROFIT_PER_DEAL,
 )
 from api.models import Club, ClubMetricsWindow, Player, Transfer, PlayerValuation
 
@@ -205,7 +206,14 @@ def _aggregate_pairs_to_metrics(pairs_data: list[dict]) -> pd.DataFrame:
         total_profit=("profit", "sum"),
         hit_rate=("profit", lambda x: (x > 0).sum() / len(x) * 100),
         value_creation=("value_creation_pct", "median"),
+        annualized_roi=("annualized_roi_pct", "median"),
+        profit_per_deal=("profit", "mean"),
     ).reset_index()
+
+    buying_premiums = df[df["peak_value"].notna() & (df["peak_value"] > 0)].groupby("club_id")["sell_fee"].apply(
+        lambda g: (((g - df.loc[g.index, "peak_value"]) / df.loc[g.index, "peak_value"]) * 100).median()
+    )
+    agg["buying_club_premium"] = agg["club_id"].map(buying_premiums)
 
     # Apply minimum transfers threshold (higher for smaller windows to avoid noise)
     min_t = max(MIN_TRANSFERS, 2)  # at least 2 deals for any window
@@ -225,12 +233,16 @@ def _aggregate_pairs_to_metrics(pairs_data: list[dict]) -> pd.DataFrame:
     agg["norm_total_profit"] = _normalize(agg["total_profit"])
     agg["norm_hit_rate"] = _normalize(agg["hit_rate"])
     agg["norm_value_creation"] = _normalize(agg["value_creation"])
+    agg["norm_annualized_roi"] = _normalize(agg["annualized_roi"].fillna(0))
+    agg["norm_profit_per_deal"] = _normalize(agg["profit_per_deal"])
 
     agg["composite_score"] = (
         WEIGHT_MEDIAN_ROI * agg["norm_median_roi"]
         + WEIGHT_TOTAL_PROFIT * agg["norm_total_profit"]
         + WEIGHT_HIT_RATE * agg["norm_hit_rate"]
         + WEIGHT_VALUE_CREATION * agg["norm_value_creation"]
+        + WEIGHT_ANNUALIZED_ROI * agg["norm_annualized_roi"]
+        + WEIGHT_PROFIT_PER_DEAL * agg["norm_profit_per_deal"]
     )
 
     return agg
@@ -258,6 +270,7 @@ async def compute_club_metrics(session: AsyncSession) -> int:
             "annualized_roi_pct": p.annualized_roi_pct,
             "value_creation_pct": p.value_creation_pct,
             "sell_fee": p.sell_fee,
+            "peak_value": p.peak_value,
         })
 
     agg = _aggregate_pairs_to_metrics(data)
@@ -275,6 +288,9 @@ async def compute_club_metrics(session: AsyncSession) -> int:
             club.total_profit = row["total_profit"]
             club.hit_rate = row["hit_rate"]
             club.value_creation = row["value_creation"]
+            club.annualized_roi = row.get("annualized_roi")
+            club.profit_per_deal = row.get("profit_per_deal")
+            club.buying_club_premium = row.get("buying_club_premium")
             club.composite_score = row["composite_score"]
             club.last_updated = datetime.now()
             club_count += 1
@@ -317,6 +333,7 @@ async def compute_club_metrics_for_window(session: AsyncSession, window_key: str
             "annualized_roi_pct": p.annualized_roi_pct,
             "value_creation_pct": p.value_creation_pct,
             "sell_fee": p.sell_fee,
+            "peak_value": p.peak_value,
         })
 
     agg = _aggregate_pairs_to_metrics(data)
@@ -344,6 +361,9 @@ async def compute_club_metrics_for_window(session: AsyncSession, window_key: str
             existing.total_profit = row["total_profit"]
             existing.hit_rate = row["hit_rate"]
             existing.value_creation = row["value_creation"]
+            existing.annualized_roi = row.get("annualized_roi")
+            existing.profit_per_deal = row.get("profit_per_deal")
+            existing.buying_club_premium = row.get("buying_club_premium")
             existing.composite_score = row["composite_score"]
             existing.last_updated = datetime.now()
         else:
@@ -355,6 +375,9 @@ async def compute_club_metrics_for_window(session: AsyncSession, window_key: str
                 total_profit=row["total_profit"],
                 hit_rate=row["hit_rate"],
                 value_creation=row["value_creation"],
+                annualized_roi=row.get("annualized_roi"),
+                profit_per_deal=row.get("profit_per_deal"),
+                buying_club_premium=row.get("buying_club_premium"),
                 composite_score=row["composite_score"],
                 last_updated=datetime.now(),
             )
