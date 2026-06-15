@@ -83,7 +83,7 @@ export default function DashboardPage() {
         </div>
         <div className="stat bg-base-200 rounded-xl">
           <div className="stat-title">Biggest Profit</div>
-          <div className="stat-value text-lg font-bold text-success">
+          <div className="stat-value text-success">
             {stats?.biggest_profit_transfer
               ? formatEuro(stats.biggest_profit_transfer.profit)
               : ""}

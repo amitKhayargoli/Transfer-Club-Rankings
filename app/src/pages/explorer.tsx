@@ -516,13 +516,13 @@ export default function ExplorerPage() {
                       href={`/players/${t.player_id}`}
                       className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                     >
-                      <img
+                      {/* <img
                         src={playerImageUrl(t.player_id, "small") ?? ""}
                         alt=""
                         className="w-6 h-6 rounded-full object-cover shrink-0 bg-base-300"
                         onError={(e) => { e.currentTarget.style.display = "none"; }}
                         loading="lazy"
-                      />
+                      /> */}
                       {t.player_name ?? "Unknown"}
                     </Link>
                   </td>

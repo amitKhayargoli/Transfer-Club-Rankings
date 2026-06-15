@@ -25,13 +25,13 @@ function calcRoi(t: { roi_pct?: number | null; profit?: number | null; sell_fee?
 
 function badgeClass(type: string | null | undefined): string {
   switch (type) {
-    case "paid": return "badge badge-success badge-xs";
+    case "paid": return "badge badge-warning badge-xs";
     case "loan": return "badge badge-info badge-xs";
     case "youth_promotion": return "badge badge-secondary badge-xs";
     case "sent_to_reserves": return "badge badge-accent badge-xs";
     case "contract_expired": return "badge badge-warning badge-xs";
     case "retired": return "badge badge-error badge-xs";
-    case "free_transfer": return "badge badge-ghost badge-xs";
+    case "free_transfer": return "badge badge-success badge-xs";
     default: return "badge badge-ghost badge-xs";
   }
 }
@@ -60,9 +60,9 @@ function formatEuro(value: number | null | undefined): string {
 }
 
 const TYPE_OPTIONS = [
-  { key: "paid", label: "Paid", cls: "badge-success" },
+  { key: "paid", label: "Paid", cls: "badge-warning" },
   { key: "loan", label: "Loan", cls: "badge-info" },
-  { key: "free_transfer", label: "Free", cls: "badge-ghost" },
+  { key: "free_transfer", label: "Free", cls: "badge-success" },
   { key: "youth_promotion", label: "Youth", cls: "badge-secondary" },
   { key: "sent_to_reserves", label: "Reserves", cls: "badge-accent" },
   { key: "contract_expired", label: "Expired", cls: "badge-warning" },

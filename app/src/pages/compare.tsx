@@ -326,8 +326,8 @@ export default function ComparePage() {
                   <Legend
                     wrapperStyle={{ fontSize: 12, color: 'oklch(var(--bc) / 0.8)' }}
                   />
-                  <Bar dataKey={comparison.club1.name} fill={resolvedPrimary} radius={[4, 4, 0, 0]} />
                   <Bar dataKey={comparison.club2.name} fill={resolvedSecondary} radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={comparison.club1.name} fill={resolvedPrimary} radius={[4, 4, 0, 0]}/>
                 </BarChart>
               </ResponsiveContainer>
             </div>

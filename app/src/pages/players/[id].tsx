@@ -126,18 +126,18 @@ export default function PlayerDetailPage() {
       {/* Player Header */}
       <div className="flex items-start gap-5">
         <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl shrink-0 overflow-hidden bg-base-200 flex items-center justify-center">
-          {!playerImgError && playerImgUrl ? (
+          {/* {!playerImgError && playerImgUrl ? (
             <img
               src={playerImgUrl}
               alt={player.name}
               className="w-full h-full object-cover"
               onError={() => setPlayerImgError(true)}
             />
-          ) : (
+          ) : ( */}
             <span className="text-3xl font-bold text-primary">
               {player.name.charAt(0)}
             </span>
-          )}
+          {/* )} */}
         </div>
         <div>
           <h1 className="text-3xl font-bold">{player.name}</h1>

@@ -36,19 +36,19 @@ const SORT_OPTIONS: { value: SortField; label: string }[] = [
 
 function PlayerThumb({ playerId, name, imageUrl }: { playerId: number; name: string; imageUrl?: string | null }) {
   const [imgError, setImgError] = useState(false);
-  const imgUrl = playerImageUrl(playerId, "small", imageUrl);
+  // const imgUrl = playerImageUrl(playerId, "small", imageUrl);
 
-  if (!imgError && imgUrl) {
-    return (
-      <img
-        src={imgUrl}
-        alt=""
-        className="w-7 h-7 rounded-full object-cover shrink-0 bg-base-300"
-        onError={() => setImgError(true)}
-        loading="lazy"
-      />
-    );
-  }
+  // if (!imgError) {
+  //   return (
+  //     <img
+  //       src={imgUrl}
+  //       alt=""
+  //       className="w-7 h-7 rounded-full object-cover shrink-0 bg-base-300"
+  //       onError={() => setImgError(true)}
+  //       loading="lazy"
+  //     />
+  //   );
+  // }
 
   // Fallback: initial letter
   return (
