@@ -67,3 +67,5 @@ Thumbs.db
 .db*
 *.db*
 graphify-out/
+data
+data/*

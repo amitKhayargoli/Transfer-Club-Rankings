@@ -14,6 +14,10 @@ from api.schemas import (
     TopClubResponse,
     TransferBase,
 )
+from api.config import MIN_TRANSFERS
+
+# Leagues that match the Rankings page filtering (top European leagues)
+_ENRICHED_LEAGUES = ["GB1", "ES1", "IT1", "FR1", "L1", "PO1", "NL1", "A1"]
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -50,7 +54,9 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
 @router.get("/top-clubs", response_model=DashboardTopClubsResponse)
 async def get_top_clubs(db: AsyncSession = Depends(get_db)):
     query = select(Club).where(
-        Club.composite_score.isnot(None)
+        Club.composite_score.isnot(None),
+        Club.total_transfers >= MIN_TRANSFERS,
+        Club.domestic_competition_id.in_(_ENRICHED_LEAGUES),
     ).order_by(Club.composite_score.desc().nullslast()).limit(10)
 
     result = await db.execute(query)
