@@ -59,18 +59,9 @@ export default function SellClubsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Analytical year window: null = all-time, "2010", "2015", "2018"
-  const [yearWindow, setYearWindow] = useState<string | null>(null);
-  const YEAR_WINDOWS = [
-    { value: null, label: "All time" },
-    { value: "2010", label: "2010+" },
-    { value: "2015", label: "2015+" },
-    { value: "2020", label: "2020+" },
-  ];
-
   const { data, isLoading } = useQuery({
-    queryKey: ["sell-leaders", sortBy, yearWindow],
-    queryFn: () => fetchSellLeaders({ per_page: 200, window: yearWindow ?? undefined }),
+    queryKey: ["sell-leaders", sortBy],
+    queryFn: () => fetchSellLeaders({ per_page: 200 }),
     placeholderData: (prev) => prev,
   });
 
@@ -111,25 +102,13 @@ export default function SellClubsPage() {
           <div className="max-w-2xl">
             <h1 className="text-3xl font-bold">💰 Best-Selling Clubs</h1>
             <p className="text-base-content/70 mt-2">
-              Which clubs generate the most profit from selling players? Ranked by total sell-side profit.
+              Which clubs generate the most profit from selling players? Ranked by total sell-side profit since 2015.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Year Window Selector */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-base-content/50 font-medium mr-1">Era:</span>
-        {YEAR_WINDOWS.map((w) => (
-          <button
-            key={w.label}
-            onClick={() => { setYearWindow(w.value); setPage(1); }}
-            className={`btn btn-xs ${yearWindow === w.value ? "btn-primary" : "btn-ghost btn-outline"}`}
-          >
-            {w.label}
-          </button>
-        ))}
-      </div>
+      <div className="badge badge-outline !p-3 text-xs">📅 Since 2015</div>
 
       {/* Search + Sort */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

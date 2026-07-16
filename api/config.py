@@ -35,10 +35,10 @@ MIN_BUY_FEE = 100_000  # Minimum buy fee (€) to include a pair in ROI calculat
                        # Prevents near-free transfers (€1K buys) from inflating ROI
 
 # Analytical boundary: separate from scrape boundary
-# The dashboard will precompute rankings for these windows so users can
-# slice by different eras without re-scraping.
-ANALYTICS_WINDOWS = [2010, 2015, 2020]
-DEFAULT_ANALYTICS_WINDOW = 2015  # Default dashboard filter (modern scouting era)
+# Single 2015+ window for the modern era.
+# Kept as a list for backward compatibility with the pipeline.
+ANALYTICS_WINDOWS = [2015]
+DEFAULT_WINDOW = "2015"  # Single default window for all club endpoints
 
 # ── Composite Score Weights ────────────────────────────────────────────────
 

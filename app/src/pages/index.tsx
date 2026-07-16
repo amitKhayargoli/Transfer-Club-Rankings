@@ -43,10 +43,10 @@ export default function DashboardPage() {
       <div className="hero bg-base-200 rounded-2xl p-8 md:p-12">
         <div className="hero-content text-center">
           <div className="max-w-2xl">
-            <h1 className="text-4xl md:text-5xl font-bold">Transfer ROI Rankings</h1>
+            <h1 className="text-4xl md:text-5xl font-bold">Transfer Scout</h1>
             <p className="py-4 text-base-content/70 text-lg">
-              Which football clubs are the best at buying low and selling high?
-              Analyzing every European transfer from 2015–2026.
+              Player scouting intelligence for the modern game.
+              Analyzing top-5 league clubs, their transfer DNA, and finding the perfect player matches.
             </p>
             {pipelineStatus && (
               <div className="badge badge-outline gap-2 !p-3">

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import (
     MIN_YEAR, MAX_YEAR, MIN_TRANSFERS, MIN_BUY_FEE,
-    ANALYTICS_WINDOWS, DEFAULT_ANALYTICS_WINDOW,
+    ANALYTICS_WINDOWS,
     WEIGHT_MEDIAN_ROI, WEIGHT_TOTAL_PROFIT, WEIGHT_HIT_RATE, WEIGHT_VALUE_CREATION,
     WEIGHT_ANNUALIZED_ROI, WEIGHT_PROFIT_PER_DEAL,
 )
@@ -222,12 +222,17 @@ def _aggregate_pairs_to_metrics(pairs_data: list[dict]) -> pd.DataFrame:
     if agg.empty:
         return agg
 
-    # Normalize metrics to 0-1 for composite score
+    # Normalize metrics to 0-1 for composite score using Z-score → clip → rescale.
+    # This is more robust than min-max for skewed data (which our metrics are).
     def _normalize(series):
-        min_v, max_v = series.min(), series.max()
-        if max_v == min_v:
+        mean, std = series.mean(), series.std()
+        if pd.isna(std) or std == 0:
             return pd.Series([0.5] * len(series))
-        return (series - min_v) / (max_v - min_v)
+        z_scores = (series - mean) / std
+        # Clip at ±3 standard deviations to tame extreme outliers
+        z_clipped = z_scores.clip(-3.0, 3.0)
+        # Rescale [-3, 3] → [0, 1]
+        return (z_clipped + 3.0) / 6.0
 
     agg["norm_median_roi"] = _normalize(agg["median_roi"])
     agg["norm_total_profit"] = _normalize(agg["total_profit"])

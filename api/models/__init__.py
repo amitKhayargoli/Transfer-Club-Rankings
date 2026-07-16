@@ -176,3 +176,74 @@ class PlayerValuation(Base):
     player_club_domestic_competition_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 
+class ScoutSupplementary(Base):
+    """Market values, wages, contracts, and FotMob data for players in the 14
+    scouting leagues. Each row is one (player, team, season, league) combo.
+
+    The `player_id` column is set during the name-matching step and links
+    back to the main ``players`` table via Transfermarkt ID or normalized name.
+    Rows where ``player_id IS NULL`` have scouting/financial data but could
+    not be linked to the main project's player records.
+    """
+    __tablename__ = "scout_supplementary"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_name: Mapped[str] = mapped_column(String, nullable=False)
+    team: Mapped[str] = mapped_column(String, nullable=False)
+    season: Mapped[str] = mapped_column(String, nullable=False)
+    league: Mapped[str] = mapped_column(String, nullable=False)
+    league_tm_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="Transfermarkt competition ID, e.g. GB1 for Premier League")
+
+    player_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True, comment="FK to players.player_id (set during linking)")
+    transfermarkt_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="Raw TM ID from supplementary CSV (int after parsing)")
+
+    market_value_eur: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    weekly_wage_eur: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    annual_wage_eur: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    contract_expiry: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    release_clause_eur: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    fotmob_id: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fotmob_xg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fotmob_shots: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fotmob_key_passes: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    __table_args__ = (
+        # Composite index for fast joins
+    )
+
+
+class ScoutPlayerStats(Base):
+    """Per-season performance statistics for players in the 14 scouting
+    leagues. The ``data`` JSON column stores all ~230 FBref/Understat metrics,
+    while key columns are extracted for indexing and querying.
+
+    This design keeps the schema manageable while still supporting the
+    scouting engine functions (which load JSON → pandas for analysis).
+    """
+    __tablename__ = "scout_player_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    team: Mapped[str] = mapped_column(String, nullable=False)
+    season: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    league: Mapped[str] = mapped_column(String, nullable=False)
+    league_tm_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    player_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True, comment="FK to players.player_id (set during linking)")
+
+    # Key numeric columns extracted for fast querying without JSON parsing
+    minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    goals: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    assists: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    position: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    age: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # All ~230 FBref/Understat metrics stored as JSON
+    data: Mapped[Optional[str]] = mapped_column(String, nullable=True, comment="JSON blob of all performance metrics")
+
+    __table_args__ = (
+        # Composite index for player-season lookups
+    )
+
+

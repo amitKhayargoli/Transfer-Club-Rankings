@@ -16,7 +16,7 @@ from alembic import context
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from api.database import Base
-from api.models import Club, Player, Transfer, PlayerValuation  # noqa: F401
+from api.models import Club, Player, Transfer, PlayerValuation, ScoutSupplementary, ScoutPlayerStats  # noqa: F401
 
 config = context.config
 

@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import get_db, init_db
-from api.models import Club, Player, Transfer, PlayerValuation
+from api.models import Club, ClubMetricsWindow, Player, Transfer, PlayerValuation
 from api.services.data_loader import run_pipeline
 from api.schemas import PipelineRunResponse, PipelineStatusResponse
 
@@ -49,11 +49,18 @@ async def get_pipeline_status(db: AsyncSession = Depends(get_db)):
     total_players = (await db.execute(select(func.count(Player.player_id)))).scalar() or 0
     total_transfers = (await db.execute(select(func.count(Transfer.transfer_id)))).scalar() or 0
 
+    # Check 2015+ window status
+    window_q = select(ClubMetricsWindow.last_updated).where(
+        ClubMetricsWindow.window_key == "2015"
+    ).order_by(ClubMetricsWindow.last_updated.desc().nullslast()).limit(1)
+    window_result = await db.execute(window_q)
+    window_last_updated = window_result.scalar_one_or_none()
+
     data_loaded = total_clubs > 0 and total_players > 0 and total_transfers > 0
 
     return PipelineStatusResponse(
         data_loaded=data_loaded,
-        last_refresh=datetime.now().isoformat() if data_loaded else None,
+        last_refresh=window_last_updated.isoformat() if window_last_updated else (datetime.now().isoformat() if data_loaded else None),
         total_clubs=total_clubs,
         total_players=total_players,
         total_transfers=total_transfers,

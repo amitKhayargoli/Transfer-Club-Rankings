@@ -38,6 +38,7 @@ class ClubListResponse(BaseModel):
 class ClubDetailResponse(ClubBase):
     league_name: Optional[str] = None
     league_logo_url: Optional[str] = None
+    top_sale: Optional["TransferBase"] = None
 
 
 class ClubCompareResponse(BaseModel):

@@ -74,19 +74,10 @@ export default function RankingsPage() {
   // Enriched leagues to show
   const enrichedLeagues = "GB1,ES1,IT1,FR1,L1,PO1,NL1,A1";
 
-  // Analytical year window: null = all-time, "2010", "2015", "2018"
-  const [yearWindow, setYearWindow] = useState<string | null>(null);
-  const YEAR_WINDOWS = [
-    { value: null, label: "All time" },
-    { value: "2010", label: "2010+" },
-    { value: "2015", label: "2015+" },
-    { value: "2020", label: "2020+" },
-  ];
-
-  // Fetch a large batch of clubs so Fuse.js can search across them client-side
+  // Fetch a large batch of clubs (2015+ era only) so Fuse.js can search across them client-side
   const { data, isLoading } = useQuery({
-    queryKey: ["clubs", sortBy, sortOrder, enrichedLeagues, yearWindow],
-    queryFn: () => fetchClubs({ sort_by: sortBy, sort_order: sortOrder, per_page: 200, leagues: enrichedLeagues, min_transfers: 8, window: yearWindow ?? undefined }),
+    queryKey: ["clubs", sortBy, sortOrder, enrichedLeagues],
+    queryFn: () => fetchClubs({ sort_by: sortBy, sort_order: sortOrder, per_page: 200, leagues: enrichedLeagues, min_transfers: 8 }),
     placeholderData: (previousData) => previousData,
   });
 
@@ -137,7 +128,7 @@ export default function RankingsPage() {
         <div>
           <h1 className="text-3xl font-bold">Club Rankings</h1>
           <p className="text-base-content/70 mt-1">
-            Top 5 Europe + European Leagues ·
+            Top 5 Europe + European Leagues · since 2015 ·
             {searchQuery.trim()
               ? ` ${totalFiltered} club${totalFiltered === 1 ? "" : "s"} matching “${searchQuery}”`
               : ` ${data?.total ?? ""} clubs ranked`}
@@ -145,19 +136,7 @@ export default function RankingsPage() {
         </div>
       </div>
 
-      {/* Year Window Selector */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-base-content/50 font-medium mr-1">Era:</span>
-        {YEAR_WINDOWS.map((w) => (
-          <button
-            key={w.label}
-            onClick={() => { setYearWindow(w.value); setPage(1); }}
-            className={`btn btn-xs ${yearWindow === w.value ? "btn-primary" : "btn-ghost btn-outline"}`}
-          >
-            {w.label}
-          </button>
-        ))}
-      </div>
+      <div className="badge badge-outline !p-3 text-xs">📅 Since 2015</div>
 
       {/* Search + Sort controls */}
       <div className="flex flex-col sm:flex-row gap-3">

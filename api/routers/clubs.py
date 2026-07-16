@@ -21,7 +21,7 @@ from api.schemas import (
     TransferBase,
     TransferListResponse,
 )
-from api.config import MIN_TRANSFERS, ANALYTICS_WINDOWS
+from api.config import MIN_TRANSFERS, ANALYTICS_WINDOWS, DEFAULT_WINDOW
 from api.utils import enrich_transfer_types
 
 
@@ -130,7 +130,7 @@ async def list_clubs(
     min_transfers: int = Query(MIN_TRANSFERS, description="Minimum transfers threshold"),
     sort_by: str = Query("composite_score", description="Sort field"),
     sort_order: str = Query("desc", description="Sort order: asc or desc"),
-    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}. Defaults to all-time if omitted."),
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Analytical year window. Defaults to {DEFAULT_WINDOW}+."),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -218,6 +218,7 @@ async def list_clubs(
 @router.get("/compare", response_model=ClubCompareResponse)
 async def compare_clubs(
     ids: str = Query(..., description="Comma-separated club IDs, e.g. '294,610'"),
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Analytical year window. Defaults to {DEFAULT_WINDOW}+."),
     db: AsyncSession = Depends(get_db),
 ):
     from fastapi import HTTPException
@@ -226,22 +227,75 @@ async def compare_clubs(
     if len(club_ids) != 2:
         raise HTTPException(status_code=400, detail="Provide exactly 2 club IDs")
 
-    club1 = await db.get(Club, club_ids[0])
-    club2 = await db.get(Club, club_ids[1])
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
 
-    if not club1 or not club2:
-        raise HTTPException(status_code=404, detail="One or both clubs not found")
+    async def _fetch_top_sale(cid: int, min_year: int | None) -> TransferBase | None:
+        """Fetch the most profitable sale for a given club.
+
+        A "sale" is a buy-sell pair where the club appears as from_club_id
+        (the club that owned the player and is selling them).
+        """
+        q = select(Transfer).where(
+            Transfer.from_club_id == cid,
+            Transfer.profit.isnot(None),
+            Transfer.profit > 0,
+        )
+        if min_year is not None:
+            q = q.where(
+                Transfer.transfer_date.isnot(None),
+                func.extract("year", Transfer.transfer_date) >= min_year,
+            )
+        q = q.order_by(Transfer.profit.desc().nullslast()).limit(1)
+        r = await db.execute(q)
+        t = r.scalar_one_or_none()
+        return TransferBase.model_validate(t) if t else None
+
+    min_year = int(window) if (window and window in [str(w) for w in ANALYTICS_WINDOWS]) else None
+
+    # Common helper: build a club response with top sale
+    async def _build_club(cid: int) -> ClubDetailResponse:
+        if window and window in [str(w) for w in ANALYTICS_WINDOWS]:
+            wm_q = select(ClubMetricsWindow).where(
+                ClubMetricsWindow.club_id == cid,
+                ClubMetricsWindow.window_key == window,
+            )
+            wm_result = await db.execute(wm_q)
+            wm = wm_result.scalar_one_or_none()
+            if wm:
+                club_entity = await db.get(Club, cid)
+                if not club_entity:
+                    raise HTTPException(status_code=404, detail=f"Club {cid} not found")
+                base = _build_club_base_from_window(wm, club_entity)
+            else:
+                club_entity = await db.get(Club, cid)
+                if not club_entity:
+                    raise HTTPException(status_code=404, detail=f"Club {cid} not found")
+                base = ClubBase.model_validate(club_entity)
+        else:
+            club_entity = await db.get(Club, cid)
+            if not club_entity:
+                raise HTTPException(status_code=404, detail=f"Club {cid} not found")
+            base = ClubBase.model_validate(club_entity)
+
+        resp = ClubDetailResponse.model_validate(base)
+        resp.league_name = COMPETITION_NAMES.get(base.domestic_competition_id or "")
+        if base.domestic_competition_id:
+            resp.league_logo_url = f"https://tmssl.akamaized.net/images/logo/medium/{base.domestic_competition_id.lower()}.png"
+        # Attach top sale
+        top_sale = await _fetch_top_sale(cid, min_year)
+        resp.top_sale = top_sale
+        return resp
 
     return ClubCompareResponse(
-        club1=ClubDetailResponse.model_validate(club1),
-        club2=ClubDetailResponse.model_validate(club2),
+        club1=await _build_club(club_ids[0]),
+        club2=await _build_club(club_ids[1]),
     )
 
 
 @router.get("/sell-leaders", response_model=ClubListResponse)
 async def list_sell_leaders(
     league: Optional[str] = Query(None, description="Filter by league"),
-    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}"),
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Analytical year window. Defaults to {DEFAULT_WINDOW}+."),
     min_transfers: int = Query(3, description="Minimum transfers threshold"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -305,7 +359,7 @@ async def list_sell_leaders(
 async def list_academy_leaders(
     league: Optional[str] = Query(None, description="Filter by league"),
     leagues: Optional[str] = Query(None, description="Filter by comma-separated league IDs, e.g. 'GB1,FR1,ES1'"),
-    window: Optional[str] = Query(None, description=f"Analytical year window: one of {ANALYTICS_WINDOWS}"),
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Analytical year window. Defaults to {DEFAULT_WINDOW}+."),
     min_transfers: int = Query(3, description="Minimum transfers threshold"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -371,12 +425,81 @@ async def list_academy_leaders(
         )
 
 
+@router.get("/metrics/stats")
+async def get_metrics_stats(
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Window to compute stats from. Defaults to {DEFAULT_WINDOW}+."),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return population mean and std for each composite-score metric.
+
+    Used by the Compare page to Z-score normalize radar chart values
+    so metrics with different scales (ROI vs Hit Rate vs Value Creation)
+    can be meaningfully compared.
+    """
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
+
+    if use_window:
+        q = select(ClubMetricsWindow).where(ClubMetricsWindow.window_key == window)
+        result = await db.execute(q)
+        rows = result.scalars().all()
+    else:
+        q = select(Club)
+        result = await db.execute(q)
+        rows = result.scalars().all()
+
+    if not rows:
+        return {}
+
+    import statistics as stats
+
+    def _metric_stats(values: list[float | None]) -> dict:
+        clean = [v for v in values if v is not None]
+        if len(clean) < 2:
+            return {"mean": 0, "std": 1}
+        return {
+            "mean": stats.mean(clean),
+            "std": stats.stdev(clean) if len(clean) > 1 else 1,
+        }
+
+    return {
+        "median_roi": _metric_stats([r.median_roi for r in rows]),
+        "total_profit": _metric_stats([r.total_profit for r in rows]),
+        "hit_rate": _metric_stats([r.hit_rate for r in rows]),
+        "value_creation": _metric_stats([r.value_creation for r in rows]),
+        "annualized_roi": _metric_stats([r.annualized_roi for r in rows]),
+        "profit_per_deal": _metric_stats([r.profit_per_deal for r in rows]),
+        "composite_score": _metric_stats([r.composite_score for r in rows]),
+    }
+
+
 @router.get("/{club_id}", response_model=ClubDetailResponse)
-async def get_club(club_id: int, db: AsyncSession = Depends(get_db)):
+async def get_club(
+    club_id: int,
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Analytical year window. Defaults to {DEFAULT_WINDOW}+."),
+    db: AsyncSession = Depends(get_db),
+):
     club = await db.get(Club, club_id)
     if not club:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Club not found")
+
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
+
+    if use_window:
+        # Fetch window metrics
+        wm_q = select(ClubMetricsWindow).where(
+            ClubMetricsWindow.club_id == club_id,
+            ClubMetricsWindow.window_key == window,
+        )
+        wm_result = await db.execute(wm_q)
+        wm = wm_result.scalar_one_or_none()
+
+        if wm:
+            base = _build_club_base_from_window(wm, club)
+        else:
+            base = ClubBase.model_validate(club)
+    else:
+        base = ClubBase.model_validate(club)
 
     # Look up league name from competitions data
     league_name = None
@@ -386,7 +509,7 @@ async def get_club(club_id: int, db: AsyncSession = Depends(get_db)):
         if league_name:
             league_logo_url = f"https://tmssl.akamaized.net/images/logo/medium/{club.domestic_competition_id.lower()}.png"
 
-    resp = ClubDetailResponse.model_validate(club)
+    resp = ClubDetailResponse.model_validate(base)
     resp.league_name = league_name
     resp.league_logo_url = league_logo_url
     return resp
@@ -395,6 +518,7 @@ async def get_club(club_id: int, db: AsyncSession = Depends(get_db)):
 @router.get("/{club_id}/transfers", response_model=TransferListResponse)
 async def get_club_transfers(
     club_id: int,
+    window: Optional[str] = Query(DEFAULT_WINDOW, description=f"Filter transfers by buy year. Defaults to {DEFAULT_WINDOW}+."),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -402,7 +526,18 @@ async def get_club_transfers(
     # Transfers where club bought (to) or sold (from)
     query = select(Transfer).where(
         (Transfer.from_club_id == club_id) | (Transfer.to_club_id == club_id)
-    ).order_by(Transfer.transfer_date.desc().nullslast())
+    )
+
+    # Apply window filter: only deals with buy year >= window
+    use_window = window and window in [str(w) for w in ANALYTICS_WINDOWS]
+    if use_window:
+        min_year = int(window)
+        query = query.where(
+            Transfer.transfer_date.isnot(None),
+            func.extract("year", Transfer.transfer_date) >= min_year,
+        )
+
+    query = query.order_by(Transfer.transfer_date.desc().nullslast())
 
     total_q = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(total_q)
